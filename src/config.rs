@@ -12,12 +12,12 @@ pub const MAX_ACTIONS: usize = 8;
 
 pub type Label = String<MAX_LABEL_LEN>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub presets: Vec<Preset, MAX_PRESETS>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preset {
     pub name: Label,
     pub buttons: Vec<ButtonConfig, MAX_BUTTONS>,
