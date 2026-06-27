@@ -47,8 +47,16 @@ pub fn source_muid(buf: &[u8]) -> [u8; 4] {
     [buf[6], buf[7], buf[8], buf[9]]
 }
 
-/// Extract the body payload from a Set Property Inquiry.
-pub fn extract_body(buf: &[u8]) -> Option<&[u8]> {
+/// Parsed Set Property Inquiry with resource identifier and body.
+pub struct SetPropertyData<'a> {
+    /// Resource identifier (preset index) from header.
+    pub resource: u8,
+    /// Body payload.
+    pub body: &'a [u8],
+}
+
+/// Extract resource identifier and body from a Set Property Inquiry.
+pub fn extract_set_property(buf: &[u8]) -> Option<SetPropertyData<'_>> {
     if !is_set_property(buf) {
         return None;
     }
@@ -63,7 +71,15 @@ pub fn extract_body(buf: &[u8]) -> Option<&[u8]> {
         return None;
     }
     let header_len = (buf[pos] as usize) | ((buf[pos + 1] as usize) << 7);
-    pos += 2 + header_len;
+    pos += 2;
+
+    // resource = first header byte (preset index), or 0 if no header
+    let resource = if header_len > 0 && pos < buf.len() {
+        buf[pos]
+    } else {
+        0
+    };
+    pos += header_len;
 
     // num_chunks + chunk_num (4 bytes)
     if pos + 4 > buf.len() {
@@ -81,7 +97,15 @@ pub fn extract_body(buf: &[u8]) -> Option<&[u8]> {
     if pos + body_len > buf.len() {
         return None;
     }
-    Some(&buf[pos..pos + body_len])
+    Some(SetPropertyData {
+        resource,
+        body: &buf[pos..pos + body_len],
+    })
+}
+
+/// Legacy helper: extract just the body (ignores resource).
+pub fn extract_body(buf: &[u8]) -> Option<&[u8]> {
+    extract_set_property(buf).map(|d| d.body)
 }
 
 /// Build a Set Property Reply (ACK).
@@ -116,11 +140,13 @@ pub fn build_set_reply(device_muid: [u8; 4], dest_muid: [u8; 4], req_id: u8) -> 
 }
 
 /// Build a Set Property Inquiry message (CLI → device).
+/// `resource` is the preset index (carried in header).
 /// `body` must contain only 7-bit safe bytes.
 pub fn build_set_inquiry(
     source_muid: [u8; 4],
     dest_muid: [u8; 4],
     req_id: u8,
+    resource: u8,
     body: &[u8],
 ) -> Vec<u8, 256> {
     let mut msg: Vec<u8, 256> = Vec::new();
@@ -137,9 +163,10 @@ pub fn build_set_inquiry(
         let _ = msg.push(b);
     }
     let _ = msg.push(req_id);
-    // header_len = 0
+    // header_len = 1 (resource byte)
+    let _ = msg.push(0x01);
     let _ = msg.push(0x00);
-    let _ = msg.push(0x00);
+    let _ = msg.push(resource);
     // num_chunks = 1, chunk_num = 1
     let _ = msg.push(0x01);
     let _ = msg.push(0x00);
@@ -162,13 +189,16 @@ mod tests {
     #[test]
     fn roundtrip_set_property() {
         let payload = b"hello";
-        let msg = build_set_inquiry([0x10, 0x20, 0x30, 0x40], [0x01, 0x02, 0x03, 0x04], 0x07, payload);
+        let msg = build_set_inquiry([0x10, 0x20, 0x30, 0x40], [0x01, 0x02, 0x03, 0x04], 0x07, 3, payload);
 
         assert!(is_ci_message(&msg));
         assert!(is_set_property(&msg));
         assert_eq!(request_id(&msg), 0x07);
         assert_eq!(source_muid(&msg), [0x10, 0x20, 0x30, 0x40]);
-        assert_eq!(extract_body(&msg).unwrap(), b"hello");
+
+        let data = extract_set_property(&msg).unwrap();
+        assert_eq!(data.resource, 3);
+        assert_eq!(data.body, b"hello");
     }
 
     #[test]
