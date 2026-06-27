@@ -191,6 +191,39 @@ pub fn is_get_property(buf: &[u8]) -> bool {
     is_ci_message(buf) && buf[4] == PE_GET_INQUIRY
 }
 
+/// Check if the message is a Get Property Reply.
+pub fn is_get_reply(buf: &[u8]) -> bool {
+    is_ci_message(buf) && buf[4] == PE_GET_REPLY
+}
+
+/// Extract body from a Get Property Reply.
+pub fn extract_get_body(buf: &[u8]) -> Option<&[u8]> {
+    if !is_get_reply(buf) || buf.len() < 16 {
+        return None;
+    }
+    let mut pos = 15;
+    if pos + 2 > buf.len() {
+        return None;
+    }
+    let header_len = (buf[pos] as usize) | ((buf[pos + 1] as usize) << 7);
+    pos += 2 + header_len;
+    // num_chunks + chunk_num
+    if pos + 4 > buf.len() {
+        return None;
+    }
+    pos += 4;
+    // body_len
+    if pos + 2 > buf.len() {
+        return None;
+    }
+    let body_len = (buf[pos] as usize) | ((buf[pos + 1] as usize) << 7);
+    pos += 2;
+    if pos + body_len > buf.len() {
+        return None;
+    }
+    Some(&buf[pos..pos + body_len])
+}
+
 /// Extract the resource identifier from a Get Property Inquiry.
 pub fn extract_get_resource(buf: &[u8]) -> Option<u8> {
     if !is_get_property(buf) || buf.len() < 16 {
