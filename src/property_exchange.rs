@@ -393,4 +393,28 @@ mod tests {
 
         assert_eq!(extract_body(&msg).unwrap(), b"data");
     }
+
+    #[test]
+    fn get_property_roundtrip() {
+        let inquiry =
+            build_get_inquiry([0x10, 0x20, 0x30, 0x40], [0x01, 0x02, 0x03, 0x04], 0x05, 7);
+        assert!(is_get_property(&inquiry));
+        assert!(!is_set_property(&inquiry));
+        assert_eq!(extract_get_resource(&inquiry), Some(7));
+        assert_eq!(request_id(&inquiry), 0x05);
+    }
+
+    #[test]
+    fn get_reply_body_extraction() {
+        let body = b"preset data here";
+        let reply = build_get_reply(
+            [0x01, 0x02, 0x03, 0x04],
+            [0x10, 0x20, 0x30, 0x40],
+            0x03,
+            2,
+            body,
+        );
+        assert!(is_get_reply(&reply));
+        assert_eq!(extract_get_body(&reply).unwrap(), body);
+    }
 }
