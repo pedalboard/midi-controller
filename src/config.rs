@@ -144,6 +144,9 @@ pub struct LedConfig {
     pub on: Color,
     /// Color when inactive/off (None = LED off)
     pub off: Color,
+    /// Animation when active (default: Solid)
+    #[serde(default)]
+    pub animation: LedAnimation,
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +180,7 @@ impl Default for LedConfig {
         LedConfig {
             on: Color::Off,
             off: Color::Off,
+            animation: LedAnimation::Solid,
         }
     }
 }
@@ -199,6 +203,7 @@ mod tests {
                             color: LedConfig {
                                 on: Color::Blue,
                                 off: Color::Off,
+                                animation: LedAnimation::Solid,
                             },
                             mode: ButtonMode::RadioGroup(1),
                             on_press: {
@@ -252,6 +257,7 @@ mod tests {
             color: LedConfig {
                 on: Color::Green,
                 off: Color::Off,
+                animation: LedAnimation::Solid,
             },
             mode: ButtonMode::Momentary,
             on_press: {
