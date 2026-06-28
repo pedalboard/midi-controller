@@ -106,12 +106,11 @@ impl RingAnimation {
     }
 }
 
-/// Stateful ring that tracks tick for temporal modifiers.
+/// Stateful ring that tracks animation state.
 #[derive(Copy, Clone)]
 pub struct LedRing {
     pub animation: RingAnimation,
     rotation: u8,
-    tick: u16,
 }
 
 impl LedRing {
@@ -122,26 +121,17 @@ impl LedRing {
                 modifier: Modifier::Solid,
             },
             rotation,
-            tick: 0,
         }
     }
 
     pub fn set(&mut self, anim: RingAnimation) {
-        if self.animation != anim {
-            self.animation = anim;
-            self.tick = 0;
-        }
+        self.animation = anim;
     }
 
-    /// Advance one frame. Call at 50Hz.
-    pub fn tick(&mut self) {
-        self.tick = self.tick.wrapping_add(1);
-    }
-
-    /// Render current frame.
-    pub fn render(&self) -> RingFrame {
+    /// Render current frame using a global tick (shared across all rings).
+    pub fn render(&self, tick: u16) -> RingFrame {
         let base = self.render_spatial();
-        self.apply_modifier(base)
+        self.apply_modifier(base, tick)
     }
 
     fn render_spatial(&self) -> RingFrame {
@@ -181,7 +171,7 @@ impl LedRing {
         }
     }
 
-    fn apply_modifier(&self, mut frame: RingFrame) -> RingFrame {
+    fn apply_modifier(&self, mut frame: RingFrame, tick: u16) -> RingFrame {
         match self.animation.modifier {
             Modifier::Solid => frame,
             Modifier::Glow => {
@@ -195,25 +185,26 @@ impl LedRing {
                 frame
             }
             Modifier::Blink => {
-                // ~4Hz at 50Hz tick rate: 12 ticks on, 12 off
-                if (self.tick / 12) % 2 == 1 {
+                // Toggle every 25 ticks (0.5s at 50Hz, or 1 beat at 24ppqn BPM)
+                if (tick / 25) % 2 == 1 {
                     [Rgb::BLACK; LEDS_PER_RING]
                 } else {
                     frame
                 }
             }
             Modifier::Pulse => {
-                // Sine-wave period ~75 ticks (1.5s at 50Hz)
-                let phase = self.tick % 75;
-                let factor = sine_u8(phase, 75);
+                // Smooth version of blink: bright during ON phase, dark during OFF
+                // Same boundaries as blink: period 50, first half = bright, second = dark
+                let pos = tick % 50;
+                let factor = sine_u8(pos, 50);
                 for px in &mut frame {
                     *px = px.scale(factor);
                 }
                 frame
             }
             Modifier::Rotate => {
-                // Shift one position every 5 ticks (10Hz rotation)
-                let shift = (self.tick / 5) as usize % LEDS_PER_RING;
+                // One step every 25 ticks (0.5s, or 1 beat)
+                let shift = (tick / 25) as usize % LEDS_PER_RING;
                 let mut rotated = [Rgb::BLACK; LEDS_PER_RING];
                 for i in 0..LEDS_PER_RING {
                     rotated[(i + shift) % LEDS_PER_RING] = frame[i];
@@ -221,7 +212,7 @@ impl LedRing {
                 rotated
             }
             Modifier::ColorCycle => {
-                let hue = (self.tick * 3) as u8;
+                let hue = (tick * 3) as u8;
                 let color = hue_to_rgb(hue);
                 for px in frame.iter_mut() {
                     if *px != Rgb::BLACK {
@@ -288,33 +279,18 @@ fn hue_to_rgb(h: u8) -> Rgb {
     }
 }
 
-/// Approximate sine: maps phase (0..period) to 0..255.
+/// Half-sine: 0 → 255 → 0 over one period. Peak at period/2.
 fn sine_u8(phase: u16, period: u16) -> u8 {
-    // Quarter-wave lookup, 16 entries
-    const QUARTER: [u8; 16] = [
+    const TABLE: [u8; 16] = [
         0, 25, 50, 74, 98, 120, 142, 162, 180, 197, 213, 226, 237, 245, 251, 255,
     ];
-    let half = period / 2;
-    let quarter = period / 4;
     let pos = phase % period;
-    let (idx_base, len) = if pos < quarter {
-        (pos, quarter)
-    } else if pos < half {
-        (half - pos - 1, quarter)
-    } else if pos < half + quarter {
-        (pos - half, quarter)
-    } else {
-        (period - pos - 1, quarter)
-    };
-    let table_idx = (idx_base as usize * 15) / len.max(1) as usize;
-    let val = QUARTER[table_idx.min(15)];
-    if pos < half {
-        val
-    } else {
-        // Second half: invert for full sine (but we want 0→255→0, not negative)
-        // Actually for pulse we want 0→255→0, so half-sine:
-        val
-    }
+    let half = period / 2;
+    // Distance from peak (0 at peak, half at edges)
+    let dist = half.abs_diff(pos);
+    // Map dist (0..half) to table index (15..0)
+    let idx = ((half - dist) as usize * 15) / half.max(1) as usize;
+    TABLE[idx.min(15)]
 }
 
 #[cfg(test)]
@@ -324,7 +300,7 @@ mod tests {
     #[test]
     fn off_renders_black() {
         let ring = LedRing::default();
-        let frame = ring.render();
+        let frame = ring.render(0);
         assert!(frame.iter().all(|px| *px == Rgb::BLACK));
     }
 
@@ -333,7 +309,7 @@ mod tests {
         let mut ring = LedRing::default();
         let c = Rgb::new(255, 0, 0);
         ring.set(RingAnimation::solid(c));
-        let frame = ring.render();
+        let frame = ring.render(0);
         assert!(frame.iter().all(|px| *px == c));
     }
 
@@ -341,7 +317,7 @@ mod tests {
     fn glow_dims_and_alternates() {
         let mut ring = LedRing::default();
         ring.set(RingAnimation::glow(Rgb::new(255, 255, 255)));
-        let frame = ring.render();
+        let frame = ring.render(0);
         // Even indices: dimmed. Odd indices: black.
         assert_eq!(frame[0], Rgb::new(32, 32, 32));
         assert_eq!(frame[1], Rgb::BLACK);
@@ -358,12 +334,9 @@ mod tests {
             modifier: Modifier::Blink,
         });
         // tick 0: on
-        assert!(ring.render().iter().all(|px| *px == c));
-        // advance 12 ticks: off
-        for _ in 0..12 {
-            ring.tick();
-        }
-        assert!(ring.render().iter().all(|px| *px == Rgb::BLACK));
+        assert!(ring.render(0).iter().all(|px| *px == c));
+        // tick 25: off
+        assert!(ring.render(25).iter().all(|px| *px == Rgb::BLACK));
     }
 
     #[test]
@@ -374,7 +347,7 @@ mod tests {
             renderer: Renderer::Dots(c, 2),
             modifier: Modifier::Solid,
         });
-        let frame = ring.render();
+        let frame = ring.render(0);
         let lit = frame.iter().filter(|px| **px != Rgb::BLACK).count();
         assert_eq!(lit, 2);
     }
@@ -386,7 +359,7 @@ mod tests {
             renderer: Renderer::Dots(Rgb::new(0, 0, 255), 3),
             modifier: Modifier::Solid,
         });
-        let frame = ring.render();
+        let frame = ring.render(0);
         let lit = frame.iter().filter(|px| **px != Rgb::BLACK).count();
         assert_eq!(lit, 3);
     }
@@ -398,7 +371,7 @@ mod tests {
             renderer: Renderer::Heatmap(12),
             modifier: Modifier::Solid,
         });
-        let frame = ring.render();
+        let frame = ring.render(0);
         let lit = frame.iter().filter(|px| **px != Rgb::BLACK).count();
         assert_eq!(lit, 11);
     }
@@ -411,11 +384,8 @@ mod tests {
             renderer: Renderer::Single(c, 0),
             modifier: Modifier::Rotate,
         });
-        let f0 = ring.render();
-        for _ in 0..5 {
-            ring.tick();
-        }
-        let f1 = ring.render();
+        let f0 = ring.render(0);
+        let f1 = ring.render(25);
         // Pattern should have shifted
         assert_ne!(f0, f1);
     }
@@ -427,9 +397,9 @@ mod tests {
             renderer: Renderer::Solid(Rgb::new(255, 255, 255)),
             modifier: Modifier::Pulse,
         });
-        // tick=0, phase=0 → sine starts at 0
-        let frame = ring.render();
-        assert!(frame[0].r < 10);
+        // tick=0, phase=0 → sine at edge, should be dim
+        let frame = ring.render(0);
+        assert!(frame[0].r < 30);
     }
 
     #[test]
@@ -448,6 +418,6 @@ mod tests {
     fn struct_sizes() {
         assert_eq!(core::mem::size_of::<Rgb>(), 3);
         assert_eq!(core::mem::size_of::<RingAnimation>(), 6);
-        assert!(core::mem::size_of::<LedRing>() <= 12);
+        assert!(core::mem::size_of::<LedRing>() <= 8);
     }
 }
