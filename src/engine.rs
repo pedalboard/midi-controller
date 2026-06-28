@@ -47,6 +47,10 @@ pub enum DisplayEvent {
         label: Label,
         value: u8,
     },
+    /// Shown while holding a button with on_long_press (before threshold fires)
+    LongPressHint { action: SystemAction },
+    /// Clear the hint (button released before threshold)
+    LongPressCancel,
 }
 
 /// Result of processing an input event.
