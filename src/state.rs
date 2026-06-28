@@ -71,6 +71,13 @@ impl PresetStateStore {
         *self = Self::new();
     }
 
+    /// Return a cleared EEPROM buffer (for writing after preset upload).
+    pub fn cleared_eeprom() -> [u8; 128] {
+        let mut buf = [0u8; 128];
+        Self::new().to_eeprom(&mut buf);
+        buf
+    }
+
     /// Switch to a new preset. Saves current working state, loads new state,
     /// and returns MIDI messages to recall the new preset's state to external gear.
     pub fn switch(
