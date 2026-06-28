@@ -153,7 +153,9 @@ impl PresetState {
         for (i, &b) in buf[..NUM_BUTTONS].iter().enumerate() {
             state.button_active[i] = b != 0;
         }
-        state.cycle_index.copy_from_slice(&buf[NUM_BUTTONS..NUM_BUTTONS * 2]);
+        state
+            .cycle_index
+            .copy_from_slice(&buf[NUM_BUTTONS..NUM_BUTTONS * 2]);
         state.encoder_values[0] = buf[12];
         state.encoder_values[1] = buf[13];
         state

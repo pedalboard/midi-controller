@@ -176,10 +176,12 @@ pub fn build_set_inquiry(
     let _ = msg.push(0x00);
     let _ = msg.push(0x01);
     let _ = msg.push(0x00);
-    // body_len
-    let _ = msg.push((body.len() & 0x7F) as u8);
-    let _ = msg.push(((body.len() >> 7) & 0x7F) as u8);
-    for &b in body {
+    // body (mcoded7 encoded)
+    let mut encoded_body = [0u8; 230];
+    let enc_len = encode_mcoded7(body, &mut encoded_body);
+    let _ = msg.push((enc_len & 0x7F) as u8);
+    let _ = msg.push(((enc_len >> 7) & 0x7F) as u8);
+    for &b in &encoded_body[..enc_len] {
         let _ = msg.push(b);
     }
     let _ = msg.push(0xF7);
@@ -309,14 +311,58 @@ pub fn build_get_reply(
     let _ = msg.push(0x00);
     let _ = msg.push(0x01);
     let _ = msg.push(0x00);
-    // body_len
-    let _ = msg.push((body.len() & 0x7F) as u8);
-    let _ = msg.push(((body.len() >> 7) & 0x7F) as u8);
-    for &b in body {
+    // body (mcoded7 encoded)
+    let mut encoded_body = [0u8; 230];
+    let enc_len = encode_mcoded7(body, &mut encoded_body);
+    let _ = msg.push((enc_len & 0x7F) as u8);
+    let _ = msg.push(((enc_len >> 7) & 0x7F) as u8);
+    for &b in &encoded_body[..enc_len] {
         let _ = msg.push(b);
     }
     let _ = msg.push(0xF7);
     msg
+}
+
+/// Encode data using mcoded7 (MIDI-CI spec): every 7 input bytes → 8 output bytes.
+/// The first byte of each group carries the high bits (bit 7) of the following 7 bytes.
+/// Returns the number of bytes written to `out`.
+pub fn encode_mcoded7(data: &[u8], out: &mut [u8]) -> usize {
+    let mut pos = 0;
+    for chunk in data.chunks(7) {
+        let mut high_bits: u8 = 0;
+        for (i, &b) in chunk.iter().enumerate() {
+            if b & 0x80 != 0 {
+                high_bits |= 1 << i;
+            }
+        }
+        out[pos] = high_bits;
+        pos += 1;
+        for &b in chunk {
+            out[pos] = b & 0x7F;
+            pos += 1;
+        }
+    }
+    pos
+}
+
+/// Decode mcoded7 data back to original bytes.
+/// Returns the number of bytes written to `out`.
+pub fn decode_mcoded7(data: &[u8], out: &mut [u8]) -> usize {
+    let mut pos = 0;
+    let mut i = 0;
+    while i < data.len() {
+        let high_bits = data[i];
+        i += 1;
+        for bit in 0..7 {
+            if i >= data.len() {
+                break;
+            }
+            out[pos] = data[i] | (if high_bits & (1 << bit) != 0 { 0x80 } else { 0 });
+            pos += 1;
+            i += 1;
+        }
+    }
+    pos
 }
 
 #[cfg(test)]
@@ -341,7 +387,9 @@ mod tests {
 
         let data = extract_set_property(&msg).unwrap();
         assert_eq!(data.resource, 3);
-        assert_eq!(data.body, b"hello");
+        let mut decoded = [0u8; 32];
+        let dec_len = decode_mcoded7(data.body, &mut decoded);
+        assert_eq!(&decoded[..dec_len], b"hello");
     }
 
     #[test]
@@ -415,6 +463,63 @@ mod tests {
             body,
         );
         assert!(is_get_reply(&reply));
-        assert_eq!(extract_get_body(&reply).unwrap(), body);
+        let raw = extract_get_body(&reply).unwrap();
+        let mut decoded = [0u8; 32];
+        let dec_len = decode_mcoded7(raw, &mut decoded);
+        assert_eq!(&decoded[..dec_len], body);
+    }
+
+    #[test]
+    fn mcoded7_roundtrip_short() {
+        let data = [0x80, 0xFF, 0x00, 0x7F];
+        let mut encoded = [0u8; 256];
+        let enc_len = encode_mcoded7(&data, &mut encoded);
+        let mut decoded = [0u8; 256];
+        let dec_len = decode_mcoded7(&encoded[..enc_len], &mut decoded);
+        assert_eq!(&decoded[..dec_len], &data);
+    }
+
+    #[test]
+    fn mcoded7_roundtrip_exact_7() {
+        let data = [0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86];
+        let mut encoded = [0u8; 256];
+        let enc_len = encode_mcoded7(&data, &mut encoded);
+        assert_eq!(enc_len, 8); // 7 input → 8 output
+        let mut decoded = [0u8; 256];
+        let dec_len = decode_mcoded7(&encoded[..enc_len], &mut decoded);
+        assert_eq!(&decoded[..dec_len], &data);
+    }
+
+    #[test]
+    fn mcoded7_roundtrip_14_bytes() {
+        let data = [0xFF; 14];
+        let mut encoded = [0u8; 256];
+        let enc_len = encode_mcoded7(&data, &mut encoded);
+        assert_eq!(enc_len, 16); // 14 → 2 groups of 8
+        let mut decoded = [0u8; 256];
+        let dec_len = decode_mcoded7(&encoded[..enc_len], &mut decoded);
+        assert_eq!(&decoded[..dec_len], &data);
+    }
+
+    #[test]
+    fn mcoded7_all_7bit_safe_is_passthrough_with_prefix() {
+        let data = [0x01, 0x7F, 0x00, 0x55];
+        let mut encoded = [0u8; 256];
+        let enc_len = encode_mcoded7(&data, &mut encoded);
+        // High bits byte should be 0 (no high bits set)
+        assert_eq!(encoded[0], 0x00);
+        assert_eq!(&encoded[1..5], &data);
+        assert_eq!(enc_len, 5);
+    }
+
+    #[test]
+    fn mcoded7_custom_rgb_color() {
+        // Simulate a postcard-serialized Custom(255, 128, 0)
+        let data = [0xFF, 0x80, 0x00];
+        let mut encoded = [0u8; 256];
+        let enc_len = encode_mcoded7(&data, &mut encoded);
+        let mut decoded = [0u8; 256];
+        let dec_len = decode_mcoded7(&encoded[..enc_len], &mut decoded);
+        assert_eq!(&decoded[..dec_len], &data);
     }
 }
