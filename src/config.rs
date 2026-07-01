@@ -21,6 +21,65 @@ pub const MAX_CYCLE_VALUES: usize = 12;
 
 pub type Label = String<MAX_LABEL_LEN>;
 
+/// PE resource ID for global configuration (presets use 0x00..0x1F).
+pub const GLOBAL_CONFIG_RESOURCE: u8 = 0x7F;
+
+/// System-wide configuration, independent of presets.
+/// Replaces OpenDeck global settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlobalConfig {
+    /// Enable DIN MIDI output for locally-generated messages.
+    #[serde(default = "default_true")]
+    pub din_enabled: bool,
+    /// Route incoming DIN MIDI → USB MIDI out.
+    #[serde(default = "default_true")]
+    pub din_to_usb_thru: bool,
+    /// Route incoming USB MIDI → DIN MIDI out.
+    #[serde(default)]
+    pub usb_to_din_thru: bool,
+    /// Route incoming USB MIDI → USB MIDI out (echo).
+    #[serde(default)]
+    pub usb_to_usb_thru: bool,
+    /// Enable MIDI Clock (0xF8) output.
+    #[serde(default)]
+    pub midi_clock: bool,
+    /// MIDI Clock tempo in BPM (30–300).
+    #[serde(default = "default_bpm")]
+    pub bpm: u16,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_bpm() -> u16 {
+    120
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            din_enabled: true,
+            din_to_usb_thru: true,
+            usb_to_din_thru: false,
+            usb_to_usb_thru: false,
+            midi_clock: false,
+            bpm: 120,
+        }
+    }
+}
+
+impl GlobalConfig {
+    /// MIDI Clock tick interval in microseconds (24 PPQ).
+    pub fn tick_interval_us(&self) -> u32 {
+        if self.bpm == 0 {
+            return 20_833; // fallback to 120 BPM
+        }
+        // 60_000_000 / (bpm * 24)
+        60_000_000 / (self.bpm as u32 * 24)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub presets: Vec<Preset, MAX_PRESETS>,
@@ -343,5 +402,70 @@ mod tests {
         assert!(bytes.len() < 80);
         let decoded: ButtonConfig = postcard::from_bytes(bytes).unwrap();
         assert_eq!(btn, decoded);
+    }
+
+    #[test]
+    fn global_config_postcard_roundtrip() {
+        let gc = GlobalConfig {
+            din_enabled: true,
+            din_to_usb_thru: true,
+            usb_to_din_thru: false,
+            usb_to_usb_thru: false,
+            midi_clock: true,
+            bpm: 140,
+        };
+        let mut buf = [0u8; 32];
+        let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
+        let decoded: GlobalConfig = postcard::from_bytes(bytes).unwrap();
+        assert_eq!(gc, decoded);
+    }
+
+    #[test]
+    fn global_config_default_values() {
+        let gc = GlobalConfig::default();
+        assert!(gc.din_enabled);
+        assert!(gc.din_to_usb_thru);
+        assert!(!gc.usb_to_din_thru);
+        assert!(!gc.usb_to_usb_thru);
+        assert!(!gc.midi_clock);
+        assert_eq!(gc.bpm, 120);
+    }
+
+    #[test]
+    fn global_config_tick_interval_120bpm() {
+        let gc = GlobalConfig {
+            bpm: 120,
+            ..Default::default()
+        };
+        // 120 BPM = 60_000_000 / (120 * 24) = 20833 µs
+        assert_eq!(gc.tick_interval_us(), 20833);
+    }
+
+    #[test]
+    fn global_config_tick_interval_60bpm() {
+        let gc = GlobalConfig {
+            bpm: 60,
+            ..Default::default()
+        };
+        // 60 BPM = 60_000_000 / (60 * 24) = 41666 µs
+        assert_eq!(gc.tick_interval_us(), 41666);
+    }
+
+    #[test]
+    fn global_config_tick_interval_zero_bpm_fallback() {
+        let gc = GlobalConfig {
+            bpm: 0,
+            ..Default::default()
+        };
+        assert_eq!(gc.tick_interval_us(), 20833);
+    }
+
+    #[test]
+    fn global_config_compact_serialization() {
+        let gc = GlobalConfig::default();
+        let mut buf = [0u8; 32];
+        let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
+        // 5 bools (1 byte each) + varint u16 (1 byte for 120) = 6 bytes
+        assert_eq!(bytes.len(), 6);
     }
 }
