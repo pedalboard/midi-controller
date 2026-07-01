@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump when any struct that is postcard-serialized into preset flash changes layout.
 /// Must match `FORMAT_VERSION` in `pedalboard-midi/src/preset_format.rs`.
-pub const PRESET_SCHEMA_VERSION: u8 = 2;
+pub const PRESET_SCHEMA_VERSION: u8 = 3;
 
 pub const MAX_PRESETS: usize = 32;
 pub const MAX_BUTTONS: usize = 6;
@@ -35,6 +35,12 @@ pub struct Preset {
     /// Initial state applied on first boot / after upload (before any user interaction).
     #[serde(default)]
     pub defaults: InitialState,
+    /// Actions fired when this preset becomes active (on switch or boot).
+    #[serde(default)]
+    pub on_enter: Vec<Action, MAX_ACTIONS>,
+    /// Actions fired when leaving this preset (before switching to another).
+    #[serde(default)]
+    pub on_exit: Vec<Action, MAX_ACTIONS>,
 }
 
 /// Default toggle/radio/encoder state for a preset on first activation.
@@ -278,6 +284,8 @@ mod tests {
                     },
                     analog: Vec::new(),
                     defaults: Default::default(),
+                    on_enter: Vec::new(),
+                    on_exit: Vec::new(),
                 });
                 p
             },

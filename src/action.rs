@@ -127,6 +127,8 @@ mod tests {
             encoders: Vec::new(),
             analog: Vec::new(),
             defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
         }
     }
 
@@ -253,6 +255,8 @@ mod tests {
             encoders,
             analog: Vec::new(),
             defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
         }
     }
 
@@ -327,6 +331,8 @@ mod tests {
             encoders: Vec::new(),
             analog,
             defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
         };
         let msg = analog_cc(&preset, 0, 2048, 4095).unwrap();
         assert_eq!(msg.data[0], 0xB0);
@@ -353,6 +359,8 @@ mod tests {
             encoders: Vec::new(),
             analog,
             defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
         };
         // Full deflection
         let msg = analog_cc(&preset, 0, 4095, 4095).unwrap();
@@ -370,6 +378,8 @@ mod tests {
             encoders: Vec::new(),
             analog: Vec::new(),
             defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
         };
         assert!(analog_cc(&preset, 0, 2048, 4095).is_none());
     }

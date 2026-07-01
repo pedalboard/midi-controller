@@ -284,6 +284,8 @@ mod tests {
             encoders,
             analog: Vec::new(),
             defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
         }
     }
 
