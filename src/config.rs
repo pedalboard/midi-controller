@@ -143,6 +143,55 @@ pub struct Preset {
     /// Actions fired when leaving this preset (before switching to another).
     #[serde(default)]
     pub on_exit: Vec<Action, MAX_ACTIONS>,
+    /// Incoming MIDI triggers: react to external messages by changing state or firing actions.
+    #[serde(default)]
+    pub triggers: Vec<Trigger, MAX_TRIGGERS>,
+}
+
+pub const MAX_TRIGGERS: usize = 8;
+
+/// A trigger that reacts to incoming MIDI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Trigger {
+    /// What incoming MIDI message to match.
+    pub match_msg: TriggerMatch,
+    /// What to do when matched.
+    pub action: TriggerAction,
+}
+
+/// Incoming MIDI message pattern to match.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriggerMatch {
+    /// Match CC on channel, with optional value range.
+    Cc {
+        cc: u8,
+        channel: u8,
+        #[serde(default)]
+        value_min: u8,
+        #[serde(default = "default_value_max")]
+        value_max: u8,
+    },
+    /// Match Program Change on channel.
+    ProgramChange { program: u8, channel: u8 },
+    /// Match Note On on channel.
+    NoteOn { note: u8, channel: u8 },
+}
+
+fn default_value_max() -> u8 {
+    127
+}
+
+/// Action to perform when a trigger matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriggerAction {
+    /// Set button active (LED on, no outgoing MIDI).
+    Activate(u8),
+    /// Set button inactive (LED off, no outgoing MIDI).
+    Deactivate(u8),
+    /// Switch to a preset by index.
+    PresetSelect(u8),
+    /// Fire button's on_press actions as if pressed.
+    Execute(u8),
 }
 
 /// Default toggle/radio/encoder state for a preset on first activation.
@@ -451,6 +500,7 @@ mod tests {
                     defaults: Default::default(),
                     on_enter: Vec::new(),
                     on_exit: Vec::new(),
+                    triggers: Vec::new(),
                 });
                 p
             },

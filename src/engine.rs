@@ -25,6 +25,7 @@ pub enum ButtonEvent {
 pub enum SystemAction {
     PresetNext,
     PresetPrev,
+    PresetSelect(u8),
 }
 
 /// Which display to show an overlay on.
@@ -340,6 +341,101 @@ fn execute_actions(
     }
 }
 
+/// Result of processing incoming MIDI against triggers.
+pub struct TriggerResult {
+    /// MIDI messages to send (from Execute action).
+    pub midi: heapless::Vec<ActionStep, 8>,
+    /// System actions (preset switch).
+    pub system: heapless::Vec<SystemAction, 2>,
+    /// Whether LED state changed (activate/deactivate).
+    pub led_dirty: bool,
+}
+
+/// Process incoming MIDI against preset triggers. Updates button state directly.
+pub fn process_triggers(
+    state: &mut PresetState,
+    preset: &Preset,
+    status: u8,
+    data1: u8,
+    data2: u8,
+) -> TriggerResult {
+    use crate::config::{TriggerAction, TriggerMatch};
+
+    let mut result = TriggerResult {
+        midi: heapless::Vec::new(),
+        system: heapless::Vec::new(),
+        led_dirty: false,
+    };
+
+    let msg_type = status & 0xF0;
+    let channel = (status & 0x0F) + 1;
+
+    for trigger in &preset.triggers {
+        let matched = match &trigger.match_msg {
+            TriggerMatch::Cc {
+                cc,
+                channel: ch,
+                value_min,
+                value_max,
+            } => {
+                msg_type == 0xB0
+                    && channel == *ch
+                    && data1 == *cc
+                    && data2 >= *value_min
+                    && data2 <= *value_max
+            }
+            TriggerMatch::ProgramChange {
+                program,
+                channel: ch,
+            } => msg_type == 0xC0 && channel == *ch && data1 == *program,
+            TriggerMatch::NoteOn { note, channel: ch } => {
+                msg_type == 0x90 && channel == *ch && data1 == *note && data2 > 0
+            }
+        };
+
+        if !matched {
+            continue;
+        }
+
+        match &trigger.action {
+            TriggerAction::Activate(btn_idx) => {
+                let idx = *btn_idx as usize;
+                if idx < state.button_active.len() {
+                    state.button_active[idx] = true;
+                    result.led_dirty = true;
+                }
+            }
+            TriggerAction::Deactivate(btn_idx) => {
+                let idx = *btn_idx as usize;
+                if idx < state.button_active.len() {
+                    state.button_active[idx] = false;
+                    result.led_dirty = true;
+                }
+            }
+            TriggerAction::PresetSelect(preset_idx) => {
+                result
+                    .system
+                    .push(SystemAction::PresetSelect(*preset_idx))
+                    .ok();
+            }
+            TriggerAction::Execute(btn_idx) => {
+                let idx = *btn_idx as usize;
+                if let Some(btn) = preset.buttons.get(idx) {
+                    execute_actions(
+                        &btn.on_press,
+                        &btn.cycle_values,
+                        &mut result.midi,
+                        &mut result.system,
+                        &mut state.cycle_index[idx],
+                    );
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// Result of a reactive CC match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReactiveResult {
@@ -404,6 +500,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         }
     }
 
@@ -458,6 +555,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
         let mut state = PresetState::default();
 
@@ -495,6 +593,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
         let mut state = PresetState::default();
 
@@ -528,6 +627,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
         let mut state = PresetState::default();
 
@@ -561,6 +661,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
         let mut state = PresetState::default();
         state.encoder_values[0] = 64;
@@ -606,6 +707,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
         let mut state = PresetState::default();
 
@@ -644,6 +746,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
 
         // Matching CC
@@ -693,6 +796,7 @@ mod tests {
             defaults: Default::default(),
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
         };
 
         assert_eq!(
