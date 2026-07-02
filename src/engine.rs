@@ -235,9 +235,15 @@ pub fn process_encoder(
 }
 
 /// Process an analog input change. Returns MIDI + display event.
-pub fn process_analog(preset: &Preset, analog_idx: usize, raw: u16, adc_max: u16) -> EngineResult {
+pub fn process_analog(
+    preset: &Preset,
+    analog_idx: usize,
+    raw: u16,
+    adc_min: u16,
+    adc_max: u16,
+) -> EngineResult {
     let mut result = EngineResult::new();
-    if let Some(msg) = analog_cc(preset, analog_idx, raw, adc_max) {
+    if let Some(msg) = analog_cc(preset, analog_idx, raw, adc_min, adc_max) {
         let side = if analog_idx == 0 {
             DisplaySide::L
         } else {

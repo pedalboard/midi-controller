@@ -69,6 +69,18 @@ pub struct GlobalConfig {
     /// MIDI Clock tempo in BPM (30–300).
     #[serde(default = "default_bpm")]
     pub bpm: u16,
+    /// Expression pedal 1 ADC value at heel (rest) position.
+    #[serde(default)]
+    pub exp1_min: u16,
+    /// Expression pedal 1 ADC value at toe (full) position.
+    #[serde(default = "default_adc_max")]
+    pub exp1_max: u16,
+    /// Expression pedal 2 ADC value at heel (rest) position.
+    #[serde(default)]
+    pub exp2_min: u16,
+    /// Expression pedal 2 ADC value at toe (full) position.
+    #[serde(default = "default_adc_max")]
+    pub exp2_max: u16,
 }
 
 fn default_true() -> bool {
@@ -77,6 +89,10 @@ fn default_true() -> bool {
 
 fn default_bpm() -> u16 {
     120
+}
+
+fn default_adc_max() -> u16 {
+    3750
 }
 
 impl Default for GlobalConfig {
@@ -88,6 +104,10 @@ impl Default for GlobalConfig {
             usb_to_usb_thru: false,
             midi_clock: false,
             bpm: 120,
+            exp1_min: 0,
+            exp1_max: 3750,
+            exp2_min: 0,
+            exp2_max: 3750,
         }
     }
 }
@@ -436,6 +456,10 @@ mod tests {
             usb_to_usb_thru: false,
             midi_clock: true,
             bpm: 140,
+            exp1_min: 180,
+            exp1_max: 3700,
+            exp2_min: 200,
+            exp2_max: 3750,
         };
         let mut buf = [0u8; 32];
         let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
@@ -488,7 +512,7 @@ mod tests {
         let gc = GlobalConfig::default();
         let mut buf = [0u8; 32];
         let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
-        // 5 bools (1 byte each) + varint u16 (1 byte for 120) = 6 bytes
-        assert_eq!(bytes.len(), 6);
+        // 5 bools (5B) + bpm varint (1B) + 4x u16 varint (1+2+1+2 = 6B) = 12 bytes
+        assert_eq!(bytes.len(), 12);
     }
 }

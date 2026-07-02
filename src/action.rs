@@ -103,11 +103,16 @@ pub fn analog_cc(
     preset: &Preset,
     analog_idx: usize,
     raw: u16,
+    adc_min: u16,
     adc_max: u16,
 ) -> Option<MidiMessage> {
     let cfg = preset.analog.get(analog_idx)?;
     let range = cfg.max - cfg.min;
-    let value = cfg.min + ((raw as u32 * range as u32) / adc_max as u32).min(range as u32) as u8;
+    // Clamp raw to calibrated range and normalize
+    let clamped = raw.clamp(adc_min, adc_max);
+    let span = adc_max.saturating_sub(adc_min).max(1) as u32;
+    let value =
+        cfg.min + (((clamped - adc_min) as u32 * range as u32) / span).min(range as u32) as u8;
     Some(MidiMessage {
         data: [0xB0 | (cfg.channel - 1), cfg.cc, value],
         len: 3,
@@ -334,7 +339,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
         };
-        let msg = analog_cc(&preset, 0, 2048, 4095).unwrap();
+        let msg = analog_cc(&preset, 0, 2048, 0, 4095).unwrap();
         assert_eq!(msg.data[0], 0xB0);
         assert_eq!(msg.data[1], 11);
         // 2048/4095 * 127 ≈ 63
@@ -363,10 +368,10 @@ mod tests {
             on_exit: heapless::Vec::new(),
         };
         // Full deflection
-        let msg = analog_cc(&preset, 0, 4095, 4095).unwrap();
+        let msg = analog_cc(&preset, 0, 4095, 0, 4095).unwrap();
         assert_eq!(msg.data, [0xB1, 4, 100]);
         // Zero
-        let msg = analog_cc(&preset, 0, 0, 4095).unwrap();
+        let msg = analog_cc(&preset, 0, 0, 0, 4095).unwrap();
         assert_eq!(msg.data, [0xB1, 4, 20]);
     }
 
@@ -381,6 +386,45 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
         };
-        assert!(analog_cc(&preset, 0, 2048, 4095).is_none());
+        assert!(analog_cc(&preset, 0, 2048, 0, 4095).is_none());
+    }
+
+    #[test]
+    fn analog_cc_with_calibration() {
+        let mut analog: Vec<AnalogConfig, MAX_ANALOG> = Vec::new();
+        analog
+            .push(AnalogConfig {
+                label: Label::new(),
+                cc: 7,
+                channel: 1,
+                min: 0,
+                max: 127,
+            })
+            .ok();
+        let preset = Preset {
+            name: Label::new(),
+            buttons: Vec::new(),
+            encoders: Vec::new(),
+            analog,
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+        };
+        // Calibrated range: 200–3700
+        // At heel (200): output = 0
+        let msg = analog_cc(&preset, 0, 200, 200, 3700).unwrap();
+        assert_eq!(msg.data[2], 0);
+        // At toe (3700): output = 127
+        let msg = analog_cc(&preset, 0, 3700, 200, 3700).unwrap();
+        assert_eq!(msg.data[2], 127);
+        // Midpoint: ~63-64
+        let msg = analog_cc(&preset, 0, 1950, 200, 3700).unwrap();
+        assert!(msg.data[2] >= 63 && msg.data[2] <= 64);
+        // Below min: clamped to 0
+        let msg = analog_cc(&preset, 0, 50, 200, 3700).unwrap();
+        assert_eq!(msg.data[2], 0);
+        // Above max: clamped to 127
+        let msg = analog_cc(&preset, 0, 4000, 200, 3700).unwrap();
+        assert_eq!(msg.data[2], 127);
     }
 }
