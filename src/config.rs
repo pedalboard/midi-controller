@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump when any struct that is postcard-serialized into preset flash changes layout.
 /// Must match `FORMAT_VERSION` in `pedalboard-midi/src/preset_format.rs`.
-pub const PRESET_SCHEMA_VERSION: u8 = 3;
+pub const PRESET_SCHEMA_VERSION: u8 = 4;
 
 pub const MAX_PRESETS: usize = 32;
 pub const MAX_BUTTONS: usize = 6;
@@ -185,22 +185,10 @@ pub enum ButtonMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
-    /// Control Change
-    Cc { cc: u8, value: u8, channel: u8 },
-    /// Program Change
-    ProgramChange { program: u8, channel: u8 },
-    /// Note On (velocity 127) — released on button release for momentary
-    NoteOn { note: u8, channel: u8 },
-    /// Note Off
-    NoteOff { note: u8, channel: u8 },
-    /// CC with toggled value (sends value_a first time, value_b next)
-    CcToggle {
-        cc: u8,
-        value_a: u8,
-        value_b: u8,
-        channel: u8,
-    },
-    /// CC cycling through button's cycle_values list on each press
+    /// Raw MIDI message (1-3 bytes, pre-encoded by CLI).
+    /// Use `midi2::BytesMessage::try_from(&data[..len])` for structured debug output.
+    Midi { data: [u8; 3], len: u8 },
+    /// CC cycling through button's cycle_values list on each press (stateful)
     CcCycle { cc: u8, channel: u8, reverse: bool },
     /// Set LED state (for sequencing LED changes in action lists)
     SetLed {
@@ -219,6 +207,37 @@ pub enum Action {
     BankUp,
     /// Bank down
     BankDown,
+}
+
+impl Action {
+    /// Control Change (status 0xBn)
+    pub fn cc(cc: u8, value: u8, channel: u8) -> Self {
+        Self::Midi {
+            data: [0xB0 | (channel - 1), cc, value],
+            len: 3,
+        }
+    }
+    /// Program Change (status 0xCn)
+    pub fn program_change(program: u8, channel: u8) -> Self {
+        Self::Midi {
+            data: [0xC0 | (channel - 1), program, 0],
+            len: 2,
+        }
+    }
+    /// Note On (status 0x9n, velocity 127)
+    pub fn note_on(note: u8, channel: u8) -> Self {
+        Self::Midi {
+            data: [0x90 | (channel - 1), note, 127],
+            len: 3,
+        }
+    }
+    /// Note Off (status 0x8n, velocity 0)
+    pub fn note_off(note: u8, channel: u8) -> Self {
+        Self::Midi {
+            data: [0x80 | (channel - 1), note, 0],
+            len: 3,
+        }
+    }
 }
 
 // --- Encoders ---
@@ -355,10 +374,7 @@ mod tests {
                             mode: ButtonMode::RadioGroup(1),
                             on_press: {
                                 let mut a = Vec::new();
-                                let _ = a.push(Action::ProgramChange {
-                                    program: 0,
-                                    channel: 2,
-                                });
+                                let _ = a.push(Action::program_change(0, 2));
                                 let _ = a.push(Action::SetLed {
                                     color: Color::Blue,
                                     animation: LedAnimation::Solid,
@@ -414,21 +430,10 @@ mod tests {
             mode: ButtonMode::Momentary,
             on_press: {
                 let mut a = Vec::new();
-                let _ = a.push(Action::ProgramChange {
-                    program: 0,
-                    channel: 1,
-                });
-                let _ = a.push(Action::Cc {
-                    cc: 69,
-                    value: 127,
-                    channel: 1,
-                });
+                let _ = a.push(Action::program_change(0, 1));
+                let _ = a.push(Action::cc(69, 127, 1));
                 let _ = a.push(Action::Delay(50));
-                let _ = a.push(Action::Cc {
-                    cc: 70,
-                    value: 0,
-                    channel: 1,
-                });
+                let _ = a.push(Action::cc(70, 0, 1));
                 a
             },
             on_release: Vec::new(),
