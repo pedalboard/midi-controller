@@ -93,50 +93,72 @@ pub fn process_button(
     let mode = &btn.mode;
 
     match event {
-        ButtonEvent::Press => {
-            match mode {
-                ButtonMode::Toggle => {
-                    state.button_active[btn_idx] = !state.button_active[btn_idx];
-                    result.led_dirty = true;
+        ButtonEvent::Press => match mode {
+            ButtonMode::Toggle => {
+                state.button_active[btn_idx] = !state.button_active[btn_idx];
+                result.led_dirty = true;
+                if state.button_active[btn_idx] {
+                    execute_actions(
+                        &btn.on_press,
+                        &btn.cycle_values,
+                        &mut result.midi,
+                        &mut result.system,
+                        &mut state.cycle_index[btn_idx],
+                    );
+                } else {
+                    execute_actions(
+                        &btn.on_release,
+                        &btn.cycle_values,
+                        &mut result.midi,
+                        &mut result.system,
+                        &mut state.cycle_index[btn_idx],
+                    );
                 }
-                ButtonMode::Momentary => {
-                    state.button_active[btn_idx] = true;
-                    result.led_dirty = true;
-                }
-                ButtonMode::RadioGroup(group) => {
-                    for j in 0..NUM_BUTTONS {
-                        if j != btn_idx {
-                            if let Some(other) = preset.buttons.get(j) {
-                                if other.mode == ButtonMode::RadioGroup(*group) {
-                                    state.button_active[j] = false;
-                                }
+            }
+            ButtonMode::Momentary => {
+                state.button_active[btn_idx] = true;
+                result.led_dirty = true;
+                execute_actions(
+                    &btn.on_press,
+                    &btn.cycle_values,
+                    &mut result.midi,
+                    &mut result.system,
+                    &mut state.cycle_index[btn_idx],
+                );
+            }
+            ButtonMode::RadioGroup(group) => {
+                for j in 0..NUM_BUTTONS {
+                    if j != btn_idx {
+                        if let Some(other) = preset.buttons.get(j) {
+                            if other.mode == ButtonMode::RadioGroup(*group) {
+                                state.button_active[j] = false;
                             }
                         }
                     }
-                    state.button_active[btn_idx] = true;
-                    result.led_dirty = true;
                 }
+                state.button_active[btn_idx] = true;
+                result.led_dirty = true;
+                execute_actions(
+                    &btn.on_press,
+                    &btn.cycle_values,
+                    &mut result.midi,
+                    &mut result.system,
+                    &mut state.cycle_index[btn_idx],
+                );
             }
-            execute_actions(
-                &btn.on_press,
-                &btn.cycle_values,
-                &mut result.midi,
-                &mut result.system,
-                &mut state.cycle_index[btn_idx],
-            );
-        }
+        },
         ButtonEvent::Release => {
             if matches!(mode, ButtonMode::Momentary) {
                 state.button_active[btn_idx] = false;
                 result.led_dirty = true;
+                execute_actions(
+                    &btn.on_release,
+                    &btn.cycle_values,
+                    &mut result.midi,
+                    &mut result.system,
+                    &mut state.cycle_index[btn_idx],
+                );
             }
-            execute_actions(
-                &btn.on_release,
-                &btn.cycle_values,
-                &mut result.midi,
-                &mut result.system,
-                &mut state.cycle_index[btn_idx],
-            );
         }
         ButtonEvent::LongPress => {
             execute_actions(
@@ -318,15 +340,33 @@ fn execute_actions(
     }
 }
 
+/// Result of a reactive CC match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactiveResult {
+    /// Heatmap fill level (0-12 LEDs).
+    Heatmap(usize, u8),
+    /// Trigger on/off (button index, active).
+    Trigger(usize, bool),
+}
+
 /// Check incoming CC against preset's reactive LED bindings.
-/// Returns Some((button_index, fill_level_0_12)) if a binding matches.
-pub fn process_incoming_cc(preset: &Preset, channel: u8, cc: u8, value: u8) -> Option<(usize, u8)> {
+pub fn process_incoming_cc(
+    preset: &Preset,
+    channel: u8,
+    cc: u8,
+    value: u8,
+) -> Option<ReactiveResult> {
+    use crate::config::ListenMode;
     for (i, btn) in preset.buttons.iter().enumerate() {
         if let Some(listen) = &btn.listen_cc {
             if listen.cc == cc && listen.channel == channel {
-                // Map 0-127 → 0-12 (12 LEDs on the ring)
-                let fill = ((value as u16 * 12) / 127).min(12) as u8;
-                return Some((i, fill));
+                return Some(match listen.mode {
+                    ListenMode::Heatmap => {
+                        let fill = ((value as u16 * 12) / 127).min(12) as u8;
+                        ReactiveResult::Heatmap(i, fill)
+                    }
+                    ListenMode::Trigger => ReactiveResult::Trigger(i, value >= listen.threshold),
+                });
             }
         }
     }
@@ -387,7 +427,8 @@ mod tests {
         process_button(&mut state, &preset, 0, ButtonEvent::Press);
         let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
         assert!(!state.button_active[0]);
-        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 80, 127]));
+        // Second press deactivates → fires on_release (CC#80 = 0)
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 80, 0]));
     }
 
     #[test]
@@ -590,6 +631,8 @@ mod tests {
                 listen_cc: Some(ListenCc {
                     cc: 100,
                     channel: 3,
+                    mode: ListenMode::default(),
+                    threshold: 64,
                 }),
             })
             .ok();
@@ -605,20 +648,68 @@ mod tests {
 
         // Matching CC
         let result = process_incoming_cc(&preset, 3, 100, 127);
-        assert_eq!(result, Some((0, 12)));
+        assert_eq!(result, Some(ReactiveResult::Heatmap(0, 12)));
 
         // Half value
         let result = process_incoming_cc(&preset, 3, 100, 64);
-        assert_eq!(result, Some((0, 6)));
+        assert_eq!(result, Some(ReactiveResult::Heatmap(0, 6)));
 
         // Zero
         let result = process_incoming_cc(&preset, 3, 100, 0);
-        assert_eq!(result, Some((0, 0)));
+        assert_eq!(result, Some(ReactiveResult::Heatmap(0, 0)));
 
         // Wrong CC
         assert_eq!(process_incoming_cc(&preset, 3, 99, 127), None);
 
         // Wrong channel
         assert_eq!(process_incoming_cc(&preset, 1, 100, 127), None);
+    }
+
+    #[test]
+    fn incoming_cc_trigger_mode() {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::default(),
+                on_press: heapless::Vec::new(),
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(),
+                listen_cc: Some(ListenCc {
+                    cc: 80,
+                    channel: 2,
+                    mode: ListenMode::Trigger,
+                    threshold: 64,
+                }),
+            })
+            .ok();
+        let preset = Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+        };
+
+        assert_eq!(
+            process_incoming_cc(&preset, 2, 80, 127),
+            Some(ReactiveResult::Trigger(0, true))
+        );
+        assert_eq!(
+            process_incoming_cc(&preset, 2, 80, 64),
+            Some(ReactiveResult::Trigger(0, true))
+        );
+        assert_eq!(
+            process_incoming_cc(&preset, 2, 80, 63),
+            Some(ReactiveResult::Trigger(0, false))
+        );
+        assert_eq!(
+            process_incoming_cc(&preset, 2, 80, 0),
+            Some(ReactiveResult::Trigger(0, false))
+        );
     }
 }

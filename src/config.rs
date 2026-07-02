@@ -178,6 +178,26 @@ pub struct ButtonConfig {
 pub struct ListenCc {
     pub cc: u8,
     pub channel: u8,
+    /// Visualization mode (default: Heatmap).
+    #[serde(default)]
+    pub mode: ListenMode,
+    /// Threshold for trigger mode (default: 64). Value ≥ threshold = on.
+    #[serde(default = "default_threshold")]
+    pub threshold: u8,
+}
+
+fn default_threshold() -> u8 {
+    64
+}
+
+/// How the LED ring reacts to incoming CC.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListenMode {
+    /// Fill proportional to value (0-127 → 0-12 LEDs).
+    #[default]
+    Heatmap,
+    /// On/off using button's color+animation when value ≥ threshold.
+    Trigger,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
