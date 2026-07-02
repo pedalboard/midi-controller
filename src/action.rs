@@ -127,27 +127,27 @@ mod tests {
 
     #[test]
     fn note_on_action() {
-        let msg = action_to_midi(&Action::note_on(60, 1)).unwrap();
+        let msg = action_to_midi(&Action::note_on(60, 1).unwrap()).unwrap();
         assert_eq!(msg.data, [0x90, 60, 127]);
         assert_eq!(msg.len, 3);
     }
 
     #[test]
     fn note_on_channel_2() {
-        let msg = action_to_midi(&Action::note_on(64, 2)).unwrap();
+        let msg = action_to_midi(&Action::note_on(64, 2).unwrap()).unwrap();
         assert_eq!(msg.data, [0x91, 64, 127]);
     }
 
     #[test]
     fn cc_action() {
-        let msg = action_to_midi(&Action::cc(10, 127, 1)).unwrap();
+        let msg = action_to_midi(&Action::cc(10, 127, 1).unwrap()).unwrap();
         assert_eq!(msg.data, [0xB0, 10, 127]);
         assert_eq!(msg.len, 3);
     }
 
     #[test]
     fn program_change_action() {
-        let msg = action_to_midi(&Action::program_change(5, 3)).unwrap();
+        let msg = action_to_midi(&Action::program_change(5, 3).unwrap()).unwrap();
         assert_eq!(msg.data, [0xC2, 5, 0]);
         assert_eq!(msg.len, 2);
     }
@@ -162,8 +162,8 @@ mod tests {
     fn execute_button_press_multi_action() {
         let mut buttons: Vec<ButtonConfig, MAX_BUTTONS> = Vec::new();
         let mut on_press: Vec<Action, MAX_ACTIONS> = Vec::new();
-        on_press.push(Action::program_change(0, 1)).ok();
-        on_press.push(Action::cc(69, 127, 1)).ok();
+        on_press.push(Action::program_change(0, 1).unwrap()).ok();
+        on_press.push(Action::cc(69, 127, 1).unwrap()).ok();
         buttons
             .push(ButtonConfig {
                 label: Label::new(),

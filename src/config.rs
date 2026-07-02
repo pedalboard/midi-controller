@@ -210,33 +210,49 @@ pub enum Action {
 }
 
 impl Action {
-    /// Control Change (status 0xBn)
-    pub fn cc(cc: u8, value: u8, channel: u8) -> Self {
-        Self::Midi {
+    /// Control Change (status 0xBn).
+    /// Returns `None` if cc > 127, value > 127, or channel not in 1..=16.
+    pub fn cc(cc: u8, value: u8, channel: u8) -> Option<Self> {
+        if cc > 127 || value > 127 || channel == 0 || channel > 16 {
+            return None;
+        }
+        Some(Self::Midi {
             data: [0xB0 | (channel - 1), cc, value],
             len: 3,
-        }
+        })
     }
-    /// Program Change (status 0xCn)
-    pub fn program_change(program: u8, channel: u8) -> Self {
-        Self::Midi {
+    /// Program Change (status 0xCn).
+    /// Returns `None` if program > 127 or channel not in 1..=16.
+    pub fn program_change(program: u8, channel: u8) -> Option<Self> {
+        if program > 127 || channel == 0 || channel > 16 {
+            return None;
+        }
+        Some(Self::Midi {
             data: [0xC0 | (channel - 1), program, 0],
             len: 2,
-        }
+        })
     }
-    /// Note On (status 0x9n, velocity 127)
-    pub fn note_on(note: u8, channel: u8) -> Self {
-        Self::Midi {
+    /// Note On (status 0x9n, velocity 127).
+    /// Returns `None` if note > 127 or channel not in 1..=16.
+    pub fn note_on(note: u8, channel: u8) -> Option<Self> {
+        if note > 127 || channel == 0 || channel > 16 {
+            return None;
+        }
+        Some(Self::Midi {
             data: [0x90 | (channel - 1), note, 127],
             len: 3,
-        }
+        })
     }
-    /// Note Off (status 0x8n, velocity 0)
-    pub fn note_off(note: u8, channel: u8) -> Self {
-        Self::Midi {
+    /// Note Off (status 0x8n, velocity 0).
+    /// Returns `None` if note > 127 or channel not in 1..=16.
+    pub fn note_off(note: u8, channel: u8) -> Option<Self> {
+        if note > 127 || channel == 0 || channel > 16 {
+            return None;
+        }
+        Some(Self::Midi {
             data: [0x80 | (channel - 1), note, 0],
             len: 3,
-        }
+        })
     }
 }
 
@@ -374,7 +390,7 @@ mod tests {
                             mode: ButtonMode::RadioGroup(1),
                             on_press: {
                                 let mut a = Vec::new();
-                                let _ = a.push(Action::program_change(0, 2));
+                                let _ = a.push(Action::program_change(0, 2).unwrap());
                                 let _ = a.push(Action::SetLed {
                                     color: Color::Blue,
                                     animation: LedAnimation::Solid,
@@ -430,10 +446,10 @@ mod tests {
             mode: ButtonMode::Momentary,
             on_press: {
                 let mut a = Vec::new();
-                let _ = a.push(Action::program_change(0, 1));
-                let _ = a.push(Action::cc(69, 127, 1));
+                let _ = a.push(Action::program_change(0, 1).unwrap());
+                let _ = a.push(Action::cc(69, 127, 1).unwrap());
                 let _ = a.push(Action::Delay(50));
-                let _ = a.push(Action::cc(70, 0, 1));
+                let _ = a.push(Action::cc(70, 0, 1).unwrap());
                 a
             },
             on_release: Vec::new(),
@@ -519,5 +535,30 @@ mod tests {
         let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
         // 5 bools (5B) + bpm varint (1B) + 4x u16 varint (1+2+1+2 = 6B) = 12 bytes
         assert_eq!(bytes.len(), 12);
+    }
+
+    #[test]
+    fn action_cc_validates_ranges() {
+        assert!(Action::cc(0, 0, 1).is_some());
+        assert!(Action::cc(127, 127, 16).is_some());
+        // cc > 127 (impossible with u8, but value/channel can be wrong)
+        assert!(Action::cc(0, 0, 0).is_none()); // channel 0
+        assert!(Action::cc(0, 0, 17).is_none()); // channel 17
+    }
+
+    #[test]
+    fn action_note_on_validates_ranges() {
+        assert!(Action::note_on(0, 1).is_some());
+        assert!(Action::note_on(127, 16).is_some());
+        assert!(Action::note_on(60, 0).is_none()); // channel 0
+        assert!(Action::note_on(60, 17).is_none()); // channel 17
+    }
+
+    #[test]
+    fn action_program_change_validates_ranges() {
+        assert!(Action::program_change(0, 1).is_some());
+        assert!(Action::program_change(127, 16).is_some());
+        assert!(Action::program_change(5, 0).is_none()); // channel 0
+        assert!(Action::program_change(5, 17).is_none()); // channel 17
     }
 }

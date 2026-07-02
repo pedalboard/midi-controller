@@ -326,9 +326,9 @@ mod tests {
     fn make_toggle_preset() -> Preset {
         let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
         let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
-        on_press.push(Action::cc(80, 127, 1)).ok();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
         let mut on_release: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
-        on_release.push(Action::cc(80, 0, 1)).ok();
+        on_release.push(Action::cc(80, 0, 1).unwrap()).ok();
         buttons
             .push(ButtonConfig {
                 label: Label::new(),
@@ -378,9 +378,9 @@ mod tests {
     fn momentary_press_and_release() {
         let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
         let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
-        on_press.push(Action::note_on(60, 1)).ok();
+        on_press.push(Action::note_on(60, 1).unwrap()).ok();
         let mut on_release: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
-        on_release.push(Action::note_off(60, 1)).ok();
+        on_release.push(Action::note_off(60, 1).unwrap()).ok();
         buttons
             .push(ButtonConfig {
                 label: Label::new(),
@@ -523,9 +523,9 @@ mod tests {
     fn delay_in_action_sequence() {
         let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
         let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
-        on_press.push(Action::cc(1, 127, 1)).ok();
+        on_press.push(Action::cc(1, 127, 1).unwrap()).ok();
         on_press.push(Action::Delay(50)).ok();
-        on_press.push(Action::cc(2, 0, 1)).ok();
+        on_press.push(Action::cc(2, 0, 1).unwrap()).ok();
         buttons
             .push(ButtonConfig {
                 label: Label::new(),

@@ -238,9 +238,9 @@ mod tests {
     fn make_preset() -> Preset {
         let mut buttons: Vec<ButtonConfig, MAX_BUTTONS> = Vec::new();
         let mut on_press: Vec<Action, MAX_ACTIONS> = Vec::new();
-        on_press.push(Action::cc(10, 127, 1)).ok();
+        on_press.push(Action::cc(10, 127, 1).unwrap()).ok();
         let mut on_release: Vec<Action, MAX_ACTIONS> = Vec::new();
-        on_release.push(Action::cc(10, 0, 1)).ok();
+        on_release.push(Action::cc(10, 0, 1).unwrap()).ok();
         buttons
             .push(ButtonConfig {
                 label: Label::new(),
