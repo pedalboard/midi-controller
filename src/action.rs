@@ -26,10 +26,13 @@ pub fn execute_button_press(preset: &Preset, btn_idx: usize) -> heapless::Vec<Mi
 /// Convert a single Action to a raw MIDI message.
 pub fn action_to_midi(action: &Action) -> Option<MidiMessage> {
     match action {
-        Action::Midi { data, len } => Some(MidiMessage {
-            data: *data,
-            len: *len as usize,
-        }),
+        Action::Midi { data, len } => {
+            let len = (*len as usize).min(3);
+            if len == 0 {
+                return None;
+            }
+            Some(MidiMessage { data: *data, len })
+        }
         _ => None,
     }
 }
