@@ -318,6 +318,21 @@ fn execute_actions(
     }
 }
 
+/// Check incoming CC against preset's reactive LED bindings.
+/// Returns Some((button_index, fill_level_0_12)) if a binding matches.
+pub fn process_incoming_cc(preset: &Preset, channel: u8, cc: u8, value: u8) -> Option<(usize, u8)> {
+    for (i, btn) in preset.buttons.iter().enumerate() {
+        if let Some(listen) = &btn.listen_cc {
+            if listen.cc == cc && listen.channel == channel {
+                // Map 0-127 → 0-12 (12 LEDs on the ring)
+                let fill = ((value as u16 * 12) / 127).min(12) as u8;
+                return Some((i, fill));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,6 +353,7 @@ mod tests {
                 on_release,
                 on_long_press: heapless::Vec::new(),
                 cycle_values: heapless::Vec::new(),
+                listen_cc: None,
             })
             .ok();
         Preset {
@@ -390,6 +406,7 @@ mod tests {
                 on_release,
                 on_long_press: heapless::Vec::new(),
                 cycle_values: heapless::Vec::new(),
+                listen_cc: None,
             })
             .ok();
         let preset = Preset {
@@ -426,6 +443,7 @@ mod tests {
                 on_release: heapless::Vec::new(),
                 on_long_press,
                 cycle_values: heapless::Vec::new(),
+                listen_cc: None,
             })
             .ok();
         let preset = Preset {
@@ -457,6 +475,7 @@ mod tests {
                     on_release: heapless::Vec::new(),
                     on_long_press: heapless::Vec::new(),
                     cycle_values: heapless::Vec::new(),
+                    listen_cc: None,
                 })
                 .ok();
         }
@@ -535,6 +554,7 @@ mod tests {
                 on_release: heapless::Vec::new(),
                 on_long_press: heapless::Vec::new(),
                 cycle_values: heapless::Vec::new(),
+                listen_cc: None,
             })
             .ok();
         let preset = Preset {
@@ -553,5 +573,52 @@ mod tests {
         assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 1, 127]));
         assert_eq!(r.midi[1], ActionStep::Delay(50));
         assert!(matches!(&r.midi[2], ActionStep::Send(m) if m.data == [0xB0, 2, 0]));
+    }
+
+    #[test]
+    fn incoming_cc_matches_listen_binding() {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::default(),
+                on_press: heapless::Vec::new(),
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(),
+                listen_cc: Some(ListenCc {
+                    cc: 100,
+                    channel: 3,
+                }),
+            })
+            .ok();
+        let preset = Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+        };
+
+        // Matching CC
+        let result = process_incoming_cc(&preset, 3, 100, 127);
+        assert_eq!(result, Some((0, 12)));
+
+        // Half value
+        let result = process_incoming_cc(&preset, 3, 100, 64);
+        assert_eq!(result, Some((0, 6)));
+
+        // Zero
+        let result = process_incoming_cc(&preset, 3, 100, 0);
+        assert_eq!(result, Some((0, 0)));
+
+        // Wrong CC
+        assert_eq!(process_incoming_cc(&preset, 3, 99, 127), None);
+
+        // Wrong channel
+        assert_eq!(process_incoming_cc(&preset, 1, 100, 127), None);
     }
 }

@@ -152,8 +152,8 @@ pub fn build_set_inquiry(
     req_id: u8,
     resource: u8,
     body: &[u8],
-) -> Vec<u8, 256> {
-    let mut msg: Vec<u8, 256> = Vec::new();
+) -> Vec<u8, 350> {
+    let mut msg: Vec<u8, 350> = Vec::new();
     let _ = msg.push(0xF0);
     let _ = msg.push(UNIVERSAL_SYSEX);
     let _ = msg.push(0x7F);
@@ -177,7 +177,7 @@ pub fn build_set_inquiry(
     let _ = msg.push(0x01);
     let _ = msg.push(0x00);
     // body (mcoded7 encoded)
-    let mut encoded_body = [0u8; 230];
+    let mut encoded_body = [0u8; 300];
     let enc_len = encode_mcoded7(body, &mut encoded_body);
     let _ = msg.push((enc_len & 0x7F) as u8);
     let _ = msg.push(((enc_len >> 7) & 0x7F) as u8);
@@ -287,8 +287,8 @@ pub fn build_get_reply(
     req_id: u8,
     resource: u8,
     body: &[u8],
-) -> Vec<u8, 256> {
-    let mut msg: Vec<u8, 256> = Vec::new();
+) -> Vec<u8, 350> {
+    let mut msg: Vec<u8, 350> = Vec::new();
     let _ = msg.push(0xF0);
     let _ = msg.push(UNIVERSAL_SYSEX);
     let _ = msg.push(0x7F);
@@ -312,7 +312,7 @@ pub fn build_get_reply(
     let _ = msg.push(0x01);
     let _ = msg.push(0x00);
     // body (mcoded7 encoded)
-    let mut encoded_body = [0u8; 230];
+    let mut encoded_body = [0u8; 300];
     let enc_len = encode_mcoded7(body, &mut encoded_body);
     let _ = msg.push((enc_len & 0x7F) as u8);
     let _ = msg.push(((enc_len >> 7) & 0x7F) as u8);

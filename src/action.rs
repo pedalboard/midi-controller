@@ -174,6 +174,7 @@ mod tests {
                 mode: ButtonMode::default(),
                 on_press,
                 cycle_values: Vec::new(),
+                listen_cc: None,
                 on_release: Vec::new(),
                 on_long_press: Vec::new(),
             })

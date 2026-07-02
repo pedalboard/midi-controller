@@ -250,6 +250,7 @@ mod tests {
                 on_release,
                 on_long_press: Vec::new(),
                 cycle_values: Vec::new(),
+                listen_cc: None,
             })
             .ok();
 

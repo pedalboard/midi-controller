@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump when any struct that is postcard-serialized into preset flash changes layout.
 /// Must match `FORMAT_VERSION` in `pedalboard-midi/src/preset_format.rs`.
-pub const PRESET_SCHEMA_VERSION: u8 = 4;
+pub const PRESET_SCHEMA_VERSION: u8 = 5;
 
 pub const MAX_PRESETS: usize = 32;
 pub const MAX_BUTTONS: usize = 6;
@@ -168,6 +168,16 @@ pub struct ButtonConfig {
     pub on_long_press: Vec<Action, MAX_ACTIONS>,
     #[serde(default)]
     pub cycle_values: Vec<u8, MAX_CYCLE_VALUES>,
+    /// Reactive LED: ring shows heatmap proportional to incoming CC value.
+    #[serde(default)]
+    pub listen_cc: Option<ListenCc>,
+}
+
+/// Reactive CC binding: maps incoming MIDI CC to LED ring visualization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListenCc {
+    pub cc: u8,
+    pub channel: u8,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -400,6 +410,7 @@ mod tests {
                             on_release: Vec::new(),
                             on_long_press: Vec::new(),
                             cycle_values: Vec::new(),
+                            listen_cc: None,
                         });
                         b
                     },
@@ -459,6 +470,7 @@ mod tests {
                 a
             },
             cycle_values: Vec::new(),
+            listen_cc: None,
         };
 
         let mut buf = [0u8; 256];
