@@ -305,6 +305,20 @@ fn execute_actions(
             Action::PresetPrev => {
                 system.push(SystemAction::PresetPrev).ok();
             }
+            Action::PresetSelect(idx) => {
+                system.push(SystemAction::PresetSelect(*idx)).ok();
+            }
+            Action::BankUp | Action::BankDown => {
+                // Bank actions are PresetSelect with page arithmetic.
+                // Requires runtime context (active preset, page size) not available here.
+                // Handled as PresetNext/PresetPrev until bank concept is defined.
+                let sa = if matches!(action, Action::BankUp) {
+                    SystemAction::PresetNext
+                } else {
+                    SystemAction::PresetPrev
+                };
+                system.push(sa).ok();
+            }
             Action::Delay(ms) => {
                 midi.push(ActionStep::Delay(*ms)).ok();
             }
@@ -815,5 +829,93 @@ mod tests {
             process_incoming_cc(&preset, 2, 80, 0),
             Some(ReactiveResult::Trigger(0, false))
         );
+    }
+
+    #[test]
+    fn preset_select_emits_system_action() {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
+        on_press.push(Action::PresetSelect(5)).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(),
+                listen_cc: None,
+            })
+            .ok();
+        let preset = Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
+        };
+        let mut state = PresetState::default();
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert_eq!(r.system.len(), 1);
+        assert_eq!(r.system[0], SystemAction::PresetSelect(5));
+        // No MIDI output — it's a system action only
+        assert!(r.midi.is_empty());
+    }
+
+    #[test]
+    fn bank_up_down_emit_system_actions() {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        let mut on_press_up: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
+        on_press_up.push(Action::BankUp).ok();
+        let mut on_press_down: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
+        on_press_down.push(Action::BankDown).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press: on_press_up,
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(),
+                listen_cc: None,
+            })
+            .ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press: on_press_down,
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(),
+                listen_cc: None,
+            })
+            .ok();
+        let preset = Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
+        };
+        let mut state = PresetState::default();
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert_eq!(r.system.len(), 1);
+        assert_eq!(r.system[0], SystemAction::PresetNext);
+
+        let r = process_button(&mut state, &preset, 1, ButtonEvent::Press);
+        assert_eq!(r.system.len(), 1);
+        assert_eq!(r.system[0], SystemAction::PresetPrev);
     }
 }
