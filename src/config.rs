@@ -27,6 +27,9 @@ pub const GLOBAL_CONFIG_RESOURCE: u8 = 0x7F;
 /// PE resource ID for system commands.
 pub const SYSTEM_COMMAND_RESOURCE: u8 = 0x7E;
 
+/// PE resource ID for device info (read-only, GET only).
+pub const DEVICE_INFO_RESOURCE: u8 = 0x7D;
+
 /// System command identifiers (body of PE Set to resource 0x7E).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -34,6 +37,17 @@ pub enum SystemCommand {
     Reboot = 0x01,
     Bootloader = 0x02,
     FactoryReset = 0x03,
+}
+
+/// Device info returned by PE GET to resource 0x7D.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    /// Flash format version (PRESET_SCHEMA_VERSION).
+    pub flash_format: u8,
+    /// Number of presets currently loaded in RAM.
+    pub presets_loaded: u8,
+    /// Number of presets skipped on boot (version mismatch).
+    pub presets_skipped: u8,
 }
 
 impl SystemCommand {

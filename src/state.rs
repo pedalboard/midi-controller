@@ -165,7 +165,10 @@ impl PresetStateStore {
 
 // --- EEPROM persistence (AT24CS01: 128 bytes) ---
 
-const EEPROM_MAGIC: u8 = 0xED;
+/// EEPROM magic encodes format version in the low nibble: 0xE0 | version.
+/// Bump EEPROM_VERSION when PresetState layout changes (field count, order, size).
+const EEPROM_VERSION: u8 = 1;
+const EEPROM_MAGIC: u8 = 0xE0 | EEPROM_VERSION;
 const EEPROM_HEADER_SIZE: usize = 2; // magic + active_preset
 const PRESET_STATE_SIZE: usize = 14; // 6 bools + 6 cycle + 2 encoder
 /// Maximum presets that fit in 128 bytes
@@ -212,7 +215,7 @@ impl PresetStateStore {
         }
     }
 
-    /// Deserialize from EEPROM buffer. Returns None if magic doesn't match.
+    /// Deserialize from EEPROM buffer. Returns None if magic/version doesn't match.
     pub fn from_eeprom(buf: &[u8; 128]) -> Option<Self> {
         if buf[0] != EEPROM_MAGIC {
             return None;
