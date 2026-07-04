@@ -10,6 +10,9 @@ This is always the starting point. All business logic lives here.
 - [ ] Implement logic in `src/engine.rs` (pure, testable, no hardware)
 - [ ] Add unit tests covering the new behavior (edge cases, boundaries, state transitions)
 - [ ] If serialized `Preset` layout changed, bump `PRESET_SCHEMA_VERSION` in `config.rs`
+  - Reordering, removing, or changing field types = **must bump**
+  - Appending a new `#[serde(default)]` field at the end = **no bump needed** (postcard tolerates trailing data)
+  - See `dotgithub/docs/adr-versioning.md` for the full versioning strategy
 - [ ] Run `cargo test` — all tests must pass
 - [ ] Push protocol first (firmware/CLI pre-commit hooks depend on remote protocol)
 
