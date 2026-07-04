@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_second_press_fires_on_press_again() {
+    fn toggle_second_press_deactivates_and_fires_on_release() {
         let preset = make_toggle_preset();
         let mut state = PresetState::default();
 
@@ -917,5 +917,450 @@ mod tests {
         let r = process_button(&mut state, &preset, 1, ButtonEvent::Press);
         assert_eq!(r.system.len(), 1);
         assert_eq!(r.system[0], SystemAction::PresetPrev);
+    }
+
+    // --- CcCycle tests ---
+
+    fn make_cc_cycle_preset(reverse: bool) -> Preset {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
+        on_press
+            .push(Action::CcCycle {
+                cc: 50,
+                channel: 1,
+                reverse,
+            })
+            .ok();
+        let mut cycle_values: heapless::Vec<u8, MAX_CYCLE_VALUES> = heapless::Vec::new();
+        cycle_values.push(0).ok();
+        cycle_values.push(32).ok();
+        cycle_values.push(64).ok();
+        cycle_values.push(127).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values,
+                listen_cc: None,
+            })
+            .ok();
+        Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
+        }
+    }
+
+    #[test]
+    fn cc_cycle_forward_iterates_values() {
+        let preset = make_cc_cycle_preset(false);
+        let mut state = PresetState::default();
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 0]));
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 32]));
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 64]));
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 127]));
+    }
+
+    #[test]
+    fn cc_cycle_forward_wraps_around() {
+        let preset = make_cc_cycle_preset(false);
+        let mut state = PresetState::default();
+
+        // Cycle through all 4 values
+        for _ in 0..4 {
+            process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        }
+        // 5th press should wrap to first value
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 0]));
+    }
+
+    #[test]
+    fn cc_cycle_reverse_iterates_backward() {
+        let preset = make_cc_cycle_preset(true);
+        let mut state = PresetState::default();
+
+        // First press at index 0: value=0, then index wraps to 3
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 0]));
+
+        // Second press at index 3: value=127, then index becomes 2
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 127]));
+
+        // Third press at index 2: value=64
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 50, 64]));
+    }
+
+    #[test]
+    fn cc_cycle_empty_values_no_output() {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
+        on_press
+            .push(Action::CcCycle {
+                cc: 50,
+                channel: 1,
+                reverse: false,
+            })
+            .ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(), // empty!
+                listen_cc: None,
+            })
+            .ok();
+        let preset = Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
+        };
+        let mut state = PresetState::default();
+
+        let r = process_button(&mut state, &preset, 0, ButtonEvent::Press);
+        assert!(r.midi.is_empty());
+    }
+
+    // --- process_analog tests ---
+
+    fn make_analog_preset(cc: u8, channel: u8, min: u8, max: u8) -> Preset {
+        let mut analog: heapless::Vec<AnalogConfig, MAX_ANALOG> = heapless::Vec::new();
+        analog
+            .push(AnalogConfig {
+                label: Label::try_from("Wah").unwrap(),
+                cc,
+                channel,
+                min,
+                max,
+            })
+            .ok();
+        Preset {
+            name: Label::new(),
+            buttons: heapless::Vec::new(),
+            encoders: heapless::Vec::new(),
+            analog,
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+            triggers: heapless::Vec::new(),
+        }
+    }
+
+    #[test]
+    fn analog_full_range_maps_to_max() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        let r = process_analog(&preset, 0, 3750, 0, 3750);
+        assert_eq!(r.midi.len(), 1);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 11, 127]));
+    }
+
+    #[test]
+    fn analog_min_maps_to_zero() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        let r = process_analog(&preset, 0, 0, 0, 3750);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 11, 0]));
+    }
+
+    #[test]
+    fn analog_midpoint() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        let r = process_analog(&preset, 0, 1875, 0, 3750);
+        // 1875/3750 * 127 = 63.5 → 63
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data[2] == 63));
+    }
+
+    #[test]
+    fn analog_custom_range() {
+        let preset = make_analog_preset(11, 1, 20, 100);
+        let r = process_analog(&preset, 0, 3750, 0, 3750);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 11, 100]));
+
+        let r = process_analog(&preset, 0, 0, 0, 3750);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 11, 20]));
+    }
+
+    #[test]
+    fn analog_clamps_below_adc_min() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        // raw=100 but adc_min=200 — clamps to min
+        let r = process_analog(&preset, 0, 100, 200, 3750);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data[2] == 0));
+    }
+
+    #[test]
+    fn analog_clamps_above_adc_max() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        // raw=4000 but adc_max=3750 — clamps to max
+        let r = process_analog(&preset, 0, 4000, 0, 3750);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data[2] == 127));
+    }
+
+    #[test]
+    fn analog_emits_display_event() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        let r = process_analog(&preset, 0, 1875, 0, 3750);
+        assert_eq!(r.display.len(), 1);
+        match &r.display[0] {
+            DisplayEvent::AnalogOverlay { side, label, value } => {
+                assert_eq!(*side, DisplaySide::L);
+                assert_eq!(label.as_str(), "Wah");
+                assert_eq!(*value, 63);
+            }
+            _ => panic!("expected AnalogOverlay"),
+        }
+    }
+
+    #[test]
+    fn analog_invalid_index_returns_empty() {
+        let preset = make_analog_preset(11, 1, 0, 127);
+        let r = process_analog(&preset, 5, 1875, 0, 3750);
+        assert!(r.midi.is_empty());
+        assert!(r.display.is_empty());
+    }
+
+    // --- Trigger tests ---
+
+    fn make_trigger_preset(triggers: heapless::Vec<Trigger, MAX_TRIGGERS>) -> Preset {
+        let mut buttons: heapless::Vec<ButtonConfig, MAX_BUTTONS> = heapless::Vec::new();
+        let mut on_press: heapless::Vec<Action, MAX_ACTIONS> = heapless::Vec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Toggle,
+                on_press,
+                on_release: heapless::Vec::new(),
+                on_long_press: heapless::Vec::new(),
+                cycle_values: heapless::Vec::new(),
+                listen_cc: None,
+            })
+            .ok();
+        Preset {
+            name: Label::new(),
+            buttons,
+            encoders: heapless::Vec::new(),
+            analog: heapless::Vec::new(),
+            defaults: Default::default(),
+            on_enter: heapless::Vec::new(),
+            on_exit: heapless::Vec::new(),
+            triggers,
+        }
+    }
+
+    #[test]
+    fn trigger_cc_activates_button() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 64,
+                    value_max: 127,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        let r = process_triggers(&mut state, &preset, 0xB0, 100, 127);
+        assert!(state.button_active[0]);
+        assert!(r.led_dirty);
+    }
+
+    #[test]
+    fn trigger_cc_below_value_min_no_match() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 64,
+                    value_max: 127,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        let r = process_triggers(&mut state, &preset, 0xB0, 100, 63);
+        assert!(!state.button_active[0]);
+        assert!(!r.led_dirty);
+    }
+
+    #[test]
+    fn trigger_deactivate_button() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 0,
+                    value_max: 63,
+                },
+                action: TriggerAction::Deactivate(0),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+        state.button_active[0] = true;
+
+        let r = process_triggers(&mut state, &preset, 0xB0, 100, 0);
+        assert!(!state.button_active[0]);
+        assert!(r.led_dirty);
+    }
+
+    #[test]
+    fn trigger_program_change_selects_preset() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::ProgramChange {
+                    program: 5,
+                    channel: 1,
+                },
+                action: TriggerAction::PresetSelect(3),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        let r = process_triggers(&mut state, &preset, 0xC0, 5, 0);
+        assert_eq!(r.system.len(), 1);
+        assert_eq!(r.system[0], SystemAction::PresetSelect(3));
+    }
+
+    #[test]
+    fn trigger_note_on_executes_button() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::NoteOn {
+                    note: 60,
+                    channel: 1,
+                },
+                action: TriggerAction::Execute(0),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        let r = process_triggers(&mut state, &preset, 0x90, 60, 127);
+        // Execute fires button 0's on_press: CC#80=127
+        assert_eq!(r.midi.len(), 1);
+        assert!(matches!(&r.midi[0], ActionStep::Send(m) if m.data == [0xB0, 80, 127]));
+    }
+
+    #[test]
+    fn trigger_note_on_velocity_zero_no_match() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::NoteOn {
+                    note: 60,
+                    channel: 1,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        // Note On with velocity 0 = Note Off, should not match
+        let r = process_triggers(&mut state, &preset, 0x90, 60, 0);
+        assert!(!state.button_active[0]);
+        assert!(!r.led_dirty);
+    }
+
+    #[test]
+    fn trigger_wrong_channel_no_match() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 2,
+                    value_min: 0,
+                    value_max: 127,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        // Send on channel 1 (0xB0), trigger expects channel 2
+        let r = process_triggers(&mut state, &preset, 0xB0, 100, 127);
+        assert!(!state.button_active[0]);
+        assert!(!r.led_dirty);
+    }
+
+    #[test]
+    fn trigger_multiple_triggers_all_fire() {
+        let mut triggers: heapless::Vec<Trigger, MAX_TRIGGERS> = heapless::Vec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 0,
+                    value_max: 127,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 64,
+                    value_max: 127,
+                },
+                action: TriggerAction::PresetSelect(2),
+            })
+            .ok();
+        let preset = make_trigger_preset(triggers);
+        let mut state = PresetState::default();
+
+        // CC#100 = 100 on ch1: matches both triggers
+        let r = process_triggers(&mut state, &preset, 0xB0, 100, 100);
+        assert!(state.button_active[0]);
+        assert!(r.led_dirty);
+        assert_eq!(r.system.len(), 1);
+        assert_eq!(r.system[0], SystemAction::PresetSelect(2));
     }
 }
