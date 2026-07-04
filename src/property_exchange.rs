@@ -14,6 +14,8 @@
 //!   <body_len_lo> <body_len_hi>
 //!   <body_data...>
 //!   F7
+//!
+//! Reply header format: `[status]` (1 byte for Set Reply) or `[status, resource]` (2 bytes for Get Reply).
 
 use heapless::Vec;
 
@@ -28,6 +30,36 @@ pub const PE_GET_REPLY: u8 = 0x35;
 pub const PE_SET_INQUIRY: u8 = 0x36;
 /// Sub-ID2: Reply to Set Property Data
 pub const PE_SET_REPLY: u8 = 0x37;
+
+/// PE reply status codes (HTTP-inspired).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PeStatus {
+    /// 200 OK — request succeeded.
+    Ok = 0x00,
+    /// 404 Not Found — resource (preset index) does not exist.
+    NotFound = 0x01,
+    /// 422 Unprocessable — body could not be deserialized.
+    FormatError = 0x02,
+    /// 409 Conflict — flash format version mismatch, re-upload required.
+    VersionMismatch = 0x03,
+}
+
+impl PeStatus {
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0x00 => Some(Self::Ok),
+            0x01 => Some(Self::NotFound),
+            0x02 => Some(Self::FormatError),
+            0x03 => Some(Self::VersionMismatch),
+            _ => None,
+        }
+    }
+
+    pub fn is_ok(self) -> bool {
+        self == Self::Ok
+    }
+}
 
 const CI_VERSION: u8 = 0x02;
 
@@ -112,8 +144,13 @@ pub fn extract_body(buf: &[u8]) -> Option<&[u8]> {
     extract_set_property(buf).map(|d| d.body)
 }
 
-/// Build a Set Property Reply (ACK).
-pub fn build_set_reply(device_muid: [u8; 4], dest_muid: [u8; 4], req_id: u8) -> Vec<u8, 32> {
+/// Build a Set Property Reply with status.
+pub fn build_set_reply(
+    device_muid: [u8; 4],
+    dest_muid: [u8; 4],
+    req_id: u8,
+    status: PeStatus,
+) -> Vec<u8, 32> {
     let mut msg: Vec<u8, 32> = Vec::new();
     let _ = msg.push(0xF0);
     let _ = msg.push(UNIVERSAL_SYSEX);
@@ -128,9 +165,10 @@ pub fn build_set_reply(device_muid: [u8; 4], dest_muid: [u8; 4], req_id: u8) -> 
         let _ = msg.push(b);
     }
     let _ = msg.push(req_id);
-    // header_len = 0
+    // header_len = 1 (status byte)
+    let _ = msg.push(0x01);
     let _ = msg.push(0x00);
-    let _ = msg.push(0x00);
+    let _ = msg.push(status as u8);
     // num_chunks = 1, chunk_num = 1
     let _ = msg.push(0x01);
     let _ = msg.push(0x00);
@@ -196,6 +234,31 @@ pub fn is_get_property(buf: &[u8]) -> bool {
 /// Check if the message is a Get Property Reply.
 pub fn is_get_reply(buf: &[u8]) -> bool {
     is_ci_message(buf) && buf[4] == PE_GET_REPLY
+}
+
+/// Extract status from a Set Property Reply or Get Property Reply.
+/// Status is the first header byte in replies.
+pub fn extract_reply_status(buf: &[u8]) -> Option<PeStatus> {
+    if buf.len() < 16 || !is_ci_message(buf) {
+        return None;
+    }
+    let sub_id2 = buf[4];
+    if sub_id2 != PE_SET_REPLY && sub_id2 != PE_GET_REPLY {
+        return None;
+    }
+    let pos = 15;
+    if pos + 2 > buf.len() {
+        return None;
+    }
+    let header_len = (buf[pos] as usize) | ((buf[pos + 1] as usize) << 7);
+    if header_len == 0 {
+        // Legacy reply without status — treat as Ok
+        return Some(PeStatus::Ok);
+    }
+    if pos + 2 + 1 > buf.len() {
+        return None;
+    }
+    PeStatus::from_byte(buf[pos + 2])
 }
 
 /// Extract body from a Get Property Reply.
@@ -280,12 +343,13 @@ pub fn build_get_inquiry(
     msg
 }
 
-/// Build a Get Property Reply with body data.
+/// Build a Get Property Reply with status and body data.
 pub fn build_get_reply(
     device_muid: [u8; 4],
     dest_muid: [u8; 4],
     req_id: u8,
     resource: u8,
+    status: PeStatus,
     body: &[u8],
 ) -> Vec<u8, 350> {
     let mut msg: Vec<u8, 350> = Vec::new();
@@ -302,9 +366,10 @@ pub fn build_get_reply(
         let _ = msg.push(b);
     }
     let _ = msg.push(req_id);
-    // header_len = 1 (resource byte)
-    let _ = msg.push(0x01);
+    // header_len = 2 (status + resource)
+    let _ = msg.push(0x02);
     let _ = msg.push(0x00);
+    let _ = msg.push(status as u8);
     let _ = msg.push(resource);
     // num_chunks = 1, chunk_num = 1
     let _ = msg.push(0x01);
@@ -400,11 +465,44 @@ mod tests {
 
     #[test]
     fn reply_structure() {
-        let reply = build_set_reply([0x01, 0x02, 0x03, 0x04], [0x10, 0x20, 0x30, 0x40], 0x07);
+        let reply = build_set_reply(
+            [0x01, 0x02, 0x03, 0x04],
+            [0x10, 0x20, 0x30, 0x40],
+            0x07,
+            PeStatus::Ok,
+        );
         assert_eq!(reply[0], 0xF0);
         assert_eq!(reply[4], PE_SET_REPLY);
         assert_eq!(reply[14], 0x07);
+        // header_len = 1, status = 0x00 (Ok)
+        assert_eq!(reply[15], 0x01); // header_len_lo
+        assert_eq!(reply[17], 0x00); // status byte
         assert_eq!(*reply.last().unwrap(), 0xF7);
+        assert_eq!(extract_reply_status(&reply), Some(PeStatus::Ok));
+    }
+
+    #[test]
+    fn reply_status_not_found() {
+        let reply = build_set_reply(
+            [0x01, 0x02, 0x03, 0x04],
+            [0x10, 0x20, 0x30, 0x40],
+            0x01,
+            PeStatus::NotFound,
+        );
+        assert_eq!(extract_reply_status(&reply), Some(PeStatus::NotFound));
+    }
+
+    #[test]
+    fn get_reply_status_extracted() {
+        let reply = build_get_reply(
+            [0x01, 0x02, 0x03, 0x04],
+            [0x10, 0x20, 0x30, 0x40],
+            0x01,
+            5,
+            PeStatus::NotFound,
+            &[],
+        );
+        assert_eq!(extract_reply_status(&reply), Some(PeStatus::NotFound));
     }
 
     #[test]
@@ -460,6 +558,7 @@ mod tests {
             [0x10, 0x20, 0x30, 0x40],
             0x03,
             2,
+            PeStatus::Ok,
             body,
         );
         assert!(is_get_reply(&reply));
