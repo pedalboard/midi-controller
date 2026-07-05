@@ -26,6 +26,8 @@ pub enum SystemAction {
     PresetNext,
     PresetPrev,
     PresetSelect(u8),
+    SetBpm(u16),
+    TapTempo,
 }
 
 /// Which display to show an overlay on.
@@ -322,6 +324,11 @@ fn execute_actions(
                     SystemAction::PresetPrev
                 };
                 system.push(sa).ok();
+            }
+            Action::TapTempo => {
+                // Handled by firmware — needs timestamp context not available here.
+                // Emit as a system action so the caller can process it.
+                system.push(SystemAction::TapTempo).ok();
             }
             Action::Delay(ms) => {
                 midi.push(ActionStep::Delay(*ms)).ok();

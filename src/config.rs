@@ -300,6 +300,9 @@ pub enum Action {
     BankUp,
     /// Bank down
     BankDown,
+    /// Tap tempo: updates MIDI clock BPM from press intervals.
+    /// Averages the last 3 intervals (needs 4 taps). Resets after 2s idle.
+    TapTempo,
 }
 
 impl Action {
