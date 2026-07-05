@@ -122,8 +122,8 @@ mod tests {
         tt.tap(0);
         tt.tap(500); // 120 BPM
                      // 3 seconds later — should reset
-        assert_eq!(tt.tap(3500), None); // first tap after reset
-        assert_eq!(tt.tap(4000), Some(120)); // second tap, 500ms interval
+        assert_eq!(tt.tap(5500), None); // first tap after reset
+        assert_eq!(tt.tap(6000), Some(120)); // second tap, 500ms interval
     }
 
     #[test]

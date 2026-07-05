@@ -54,6 +54,8 @@ pub enum DisplayEvent {
     LongPressHint { action: SystemAction },
     /// Clear the hint (button released before threshold)
     LongPressCancel,
+    /// Tap tempo BPM overlay (shown briefly after BPM is computed)
+    BpmOverlay { bpm: u16 },
 }
 
 /// A single step in an action sequence: either a MIDI message, a delay, or an LED change.
