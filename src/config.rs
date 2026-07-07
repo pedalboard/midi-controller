@@ -48,6 +48,8 @@ pub struct DeviceInfo {
     pub presets_loaded: u8,
     /// Number of presets skipped on boot (version mismatch).
     pub presets_skipped: u8,
+    /// Firmware version string (e.g. "0.2.0-76de139").
+    pub version: String<24>,
 }
 
 impl SystemCommand {
