@@ -26,7 +26,7 @@ const NUM_ENCODERS: usize = 2;
 /// Abstract input event. Hardware-agnostic — firmware maps GPIO edges to these,
 /// the simulator maps keyboard/WebSocket events to these.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InputEvent {
+pub enum Event {
     /// Button edge (index 0..5).
     ButtonEdge { index: u8, edge: Edge },
     /// Encoder detent (index 0..1).
@@ -43,13 +43,13 @@ pub enum InputEvent {
 
 /// Result of processing an input event through the Controller.
 /// Contains everything the caller needs to emit — no further logic required.
-pub struct ControllerResult {
+pub struct Output {
     /// MIDI actions to emit (includes on_enter/on_exit/recall on preset switch).
     pub midi: heapless::Vec<ActionStep, 32>,
     /// Display events (overlays, hints).
     pub display: heapless::Vec<DisplayEvent, 2>,
     /// Whether LED state changed and needs re-rendering.
-    pub led_dirty: bool,
+    pub leds_changed: bool,
     /// Whether a preset switch occurred (caller may need to update display).
     pub preset_changed: bool,
     /// BPM computed from tap tempo (if any).
@@ -58,12 +58,12 @@ pub struct ControllerResult {
     pending_system: heapless::Vec<SystemAction, 2>,
 }
 
-impl ControllerResult {
+impl Output {
     fn new() -> Self {
         Self {
             midi: heapless::Vec::new(),
             display: heapless::Vec::new(),
-            led_dirty: false,
+            leds_changed: false,
             preset_changed: false,
             bpm: None,
             pending_system: heapless::Vec::new(),
@@ -81,7 +81,7 @@ impl ControllerResult {
 /// let result = ctrl.process(event, now_ms, &config);
 /// // Send result.midi via MIDI output
 /// // Update display from result.display
-/// // Re-render LEDs if result.led_dirty
+/// // Re-render LEDs if result.leds_changed
 /// ```
 pub struct Controller {
     state_store: PresetStateStore,
@@ -126,19 +126,19 @@ impl Controller {
 
     /// Process a single input event. Returns all MIDI output, display events,
     /// and flags. System actions (preset switch, tap tempo) are handled internally.
-    pub fn process(&mut self, event: InputEvent, now_ms: u32, config: &Config) -> ControllerResult {
+    pub fn process(&mut self, event: Event, now_ms: u32, config: &Config) -> Output {
         let mut result = match event {
-            InputEvent::ButtonEdge { index, edge } => {
+            Event::ButtonEdge { index, edge } => {
                 self.process_button(index as usize, edge, now_ms, config)
             }
-            InputEvent::EncoderTurn { index, clockwise } => {
+            Event::EncoderTurn { index, clockwise } => {
                 self.process_encoder(index as usize, clockwise, now_ms, config)
             }
-            InputEvent::Analog { index, raw } => self.process_analog(index as usize, raw, config),
-            InputEvent::IncomingMidi { data, len } => {
+            Event::Analog { index, raw } => self.process_analog(index as usize, raw, config),
+            Event::IncomingMidi { data, len } => {
                 self.do_process_incoming_midi(&data[..len as usize], config)
             }
-            InputEvent::Tick => self.do_tick(now_ms, config),
+            Event::Tick => self.do_tick(now_ms, config),
         };
 
         // Handle system actions produced by event processing
@@ -147,10 +147,10 @@ impl Controller {
         result
     }
 
-    fn do_tick(&mut self, now_ms: u32, config: &Config) -> ControllerResult {
-        let mut result = ControllerResult::new();
+    fn do_tick(&mut self, now_ms: u32, config: &Config) -> Output {
+        let mut result = Output::new();
 
-        if !self.any_active() {
+        if !self.button_held() {
             return result;
         }
 
@@ -177,8 +177,8 @@ impl Controller {
         result
     }
 
-    fn do_process_incoming_midi(&mut self, raw: &[u8], config: &Config) -> ControllerResult {
-        let mut result = ControllerResult::new();
+    fn do_process_incoming_midi(&mut self, raw: &[u8], config: &Config) -> Output {
+        let mut result = Output::new();
 
         let preset = match config.presets.get(self.active_preset as usize) {
             Some(p) => p,
@@ -195,7 +195,7 @@ impl Controller {
                 result.midi.push(step.clone()).ok();
             }
             if trigger_result.led_dirty {
-                result.led_dirty = true;
+                result.leds_changed = true;
             }
 
             // Handle system actions from triggers (preset switch)
@@ -208,12 +208,12 @@ impl Controller {
     }
 
     /// Returns true if any button is currently held.
-    pub fn any_active(&self) -> bool {
+    pub fn button_held(&self) -> bool {
         self.long_press.iter().any(|lp| lp.is_active())
     }
 
     /// Returns the current button active state (toggle ON / momentary held).
-    pub fn button_active(&self) -> &[bool; NUM_BUTTONS] {
+    pub fn button_states(&self) -> &[bool; NUM_BUTTONS] {
         &self.button_active
     }
 
@@ -237,7 +237,7 @@ impl Controller {
     }
 
     /// Serialize current state for EEPROM persistence.
-    pub fn eeprom_state(&self) -> heapless::Vec<u8, 128> {
+    pub fn save_state(&self) -> heapless::Vec<u8, 128> {
         let mut buf = [0u8; 128];
         let mut store_copy = self.state_store.clone();
         let working = self.working_state();
@@ -248,8 +248,8 @@ impl Controller {
 
     /// Manually switch to a preset (e.g., on boot or from external command).
     /// Returns on_enter + recall MIDI in the result.
-    pub fn switch_to(&mut self, preset_idx: u8, config: &Config) -> ControllerResult {
-        let mut result = ControllerResult::new();
+    pub fn select_preset(&mut self, preset_idx: u8, config: &Config) -> Output {
+        let mut result = Output::new();
         self.do_switch_preset(preset_idx, &mut result, config);
         result
     }
@@ -269,12 +269,7 @@ impl Controller {
         config.presets.get(self.active_preset as usize)
     }
 
-    fn handle_system_actions(
-        &mut self,
-        result: &mut ControllerResult,
-        now_ms: u32,
-        config: &Config,
-    ) {
+    fn handle_system_actions(&mut self, result: &mut Output, now_ms: u32, config: &Config) {
         let actions: heapless::Vec<SystemAction, 2> = result.pending_system.clone();
         result.pending_system.clear();
         for action in &actions {
@@ -282,14 +277,8 @@ impl Controller {
         }
     }
 
-    fn process_button(
-        &mut self,
-        index: usize,
-        edge: Edge,
-        now_ms: u32,
-        config: &Config,
-    ) -> ControllerResult {
-        let mut result = ControllerResult::new();
+    fn process_button(&mut self, index: usize, edge: Edge, now_ms: u32, config: &Config) -> Output {
+        let mut result = Output::new();
 
         let preset = match self.current_preset(config) {
             Some(p) => p,
@@ -317,11 +306,11 @@ impl Controller {
                 match edge {
                     Edge::Activate => {
                         self.button_active[index] = true;
-                        result.led_dirty = true;
+                        result.leds_changed = true;
                     }
                     Edge::Deactivate => {
                         self.button_active[index] = false;
-                        result.led_dirty = true;
+                        result.leds_changed = true;
                     }
                 }
             }
@@ -370,7 +359,7 @@ impl Controller {
         index: usize,
         gesture: Gesture,
         preset: &Preset,
-        result: &mut ControllerResult,
+        result: &mut Output,
     ) {
         let mode = preset
             .buttons
@@ -415,8 +404,8 @@ impl Controller {
         clockwise: bool,
         now_ms: u32,
         config: &Config,
-    ) -> ControllerResult {
-        let mut result = ControllerResult::new();
+    ) -> Output {
+        let mut result = Output::new();
         let preset = match self.current_preset(config) {
             Some(p) => p,
             None => return result,
@@ -440,8 +429,8 @@ impl Controller {
         result
     }
 
-    fn process_analog(&mut self, index: usize, raw: u16, config: &Config) -> ControllerResult {
-        let mut result = ControllerResult::new();
+    fn process_analog(&mut self, index: usize, raw: u16, config: &Config) -> Output {
+        let mut result = Output::new();
         let preset = match self.current_preset(config) {
             Some(p) => p,
             None => return result,
@@ -457,7 +446,7 @@ impl Controller {
     }
 
     /// Merge engine result into controller result, intercepting system actions.
-    fn merge_engine_result(&mut self, r: &EngineResult, result: &mut ControllerResult) {
+    fn merge_engine_result(&mut self, r: &EngineResult, result: &mut Output) {
         for step in &r.midi {
             result.midi.push(step.clone()).ok();
         }
@@ -465,13 +454,13 @@ impl Controller {
             result.display.push(d.clone()).ok();
         }
         if r.led_dirty {
-            result.led_dirty = true;
+            result.leds_changed = true;
         }
         // System actions are collected — will be handled by the caller (process/tick)
         // via handle_system_actions after the event processing completes.
-        // We store them temporarily in a hidden field... but ControllerResult doesn't
+        // We store them temporarily in a hidden field... but Output doesn't
         // have system anymore. Let's use a simpler approach:
-        // We handle them inline by storing in a temp vec on ControllerResult.
+        // We handle them inline by storing in a temp vec on Output.
         for s in &r.system {
             result.pending_system.push(*s).ok();
         }
@@ -480,7 +469,7 @@ impl Controller {
     fn execute_system_action(
         &mut self,
         action: SystemAction,
-        result: &mut ControllerResult,
+        result: &mut Output,
         now_ms: u32,
         config: &Config,
     ) {
@@ -521,7 +510,7 @@ impl Controller {
         }
     }
 
-    fn do_switch_preset(&mut self, new_idx: u8, result: &mut ControllerResult, config: &Config) {
+    fn do_switch_preset(&mut self, new_idx: u8, result: &mut Output, config: &Config) {
         let old_preset = config.presets.get(self.active_preset as usize);
         let new_preset = config.presets.get(new_idx as usize);
 
@@ -571,7 +560,7 @@ impl Controller {
         }
 
         result.preset_changed = true;
-        result.led_dirty = true;
+        result.leds_changed = true;
     }
 
     fn working_state(&self) -> PresetState {
