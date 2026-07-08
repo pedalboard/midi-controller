@@ -25,7 +25,7 @@ const NUM_ENCODERS: usize = 2;
 
 /// Abstract input event. Hardware-agnostic — firmware maps GPIO edges to these,
 /// the simulator maps keyboard/WebSocket events to these.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputEvent {
     /// Button edge (index 0..5).
     ButtonEdge { index: u8, edge: Edge },
@@ -40,6 +40,11 @@ pub enum InputEvent {
     },
     /// Tap tempo button press.
     TapTempo,
+    /// Incoming MIDI (for trigger processing). Up to 3 bytes.
+    IncomingMidi { data: [u8; 3], len: u8 },
+    /// Periodic tick — drives long-press detection. Send every 1-10ms.
+    /// No-op if no buttons are held.
+    Tick,
 }
 
 /// Result of processing an input event through the Controller.
@@ -149,18 +154,25 @@ impl Controller {
                 }
                 r
             }
+            InputEvent::IncomingMidi { data, len } => {
+                self.do_process_incoming_midi(&data[..len as usize], config)
+            }
+            InputEvent::Tick => self.do_tick(now_ms, config),
         };
 
-        // Handle system actions produced by button processing
+        // Handle system actions produced by event processing
         self.handle_system_actions(&mut result, config);
 
         result
     }
 
-    /// Poll with no event — needed for long-press detection while button is held.
-    /// Call this periodically (e.g., every 1-10ms) when a button is active.
-    pub fn tick(&mut self, now_ms: u32, config: &Config) -> ControllerResult {
+    fn do_tick(&mut self, now_ms: u32, config: &Config) -> ControllerResult {
         let mut result = ControllerResult::new();
+
+        if !self.any_active() {
+            return result;
+        }
+
         let preset = match config.presets.get(self.active_preset as usize) {
             Some(p) => p,
             None => return result,
@@ -181,14 +193,10 @@ impl Controller {
             }
         }
 
-        // Handle system actions from long-press (e.g., PresetNext)
-        self.handle_system_actions(&mut result, config);
-
         result
     }
 
-    /// Process incoming MIDI against preset triggers.
-    pub fn process_incoming_midi(&mut self, raw: &[u8], config: &Config) -> ControllerResult {
+    fn do_process_incoming_midi(&mut self, raw: &[u8], config: &Config) -> ControllerResult {
         let mut result = ControllerResult::new();
 
         let preset = match config.presets.get(self.active_preset as usize) {
