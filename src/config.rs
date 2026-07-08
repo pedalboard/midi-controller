@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump when any struct that is postcard-serialized into preset flash changes layout.
 /// Must match `FORMAT_VERSION` in `pedalboard-midi/src/preset_format.rs`.
-pub const PRESET_SCHEMA_VERSION: u8 = 5;
+pub const PRESET_SCHEMA_VERSION: u8 = 6;
 
 pub const MAX_PRESETS: usize = 32;
 pub const MAX_BUTTONS: usize = 6;
@@ -370,6 +370,24 @@ impl Action {
 pub struct EncoderConfig {
     pub label: Label,
     pub action: EncoderAction,
+    /// LED ring configuration. Default: Heatmap (tracks encoder value).
+    #[serde(default = "encoder_led_default")]
+    pub color: LedConfig,
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self {
+            label: Label::new(),
+            action: EncoderAction::Cc {
+                cc: 0,
+                channel: 1,
+                min: 0,
+                max: 127,
+            },
+            color: encoder_led_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -457,6 +475,9 @@ pub enum LedRenderer {
     Single,
     /// N evenly-spaced LEDs (param = count 1-6)
     Dots,
+    /// Value-driven heatmap (blue→green→red). Default for encoders.
+    /// `renderer_param` is the current fill level (0-12), typically driven by encoder value.
+    Heatmap,
 }
 
 // --- Defaults ---
@@ -477,6 +498,17 @@ impl Default for LedConfig {
             renderer: LedRenderer::Solid,
             renderer_param: 0,
         }
+    }
+}
+
+/// Default LED config for encoders: Heatmap renderer (tracks encoder value).
+fn encoder_led_default() -> LedConfig {
+    LedConfig {
+        on: Color::Off,
+        off: Color::Off,
+        animation: LedAnimation::Solid,
+        renderer: LedRenderer::Heatmap,
+        renderer_param: 0,
     }
 }
 
@@ -530,6 +562,7 @@ mod tests {
                                 min: 0,
                                 max: 127,
                             },
+                            ..Default::default()
                         });
                         e
                     },
@@ -748,6 +781,7 @@ mod tests {
                         min: 0,
                         max: 127,
                     },
+                    ..Default::default()
                 });
                 e
             },
@@ -817,8 +851,8 @@ mod tests {
         }
 
         let hash = fnv1a(bytes);
-        const EXPECTED_HASH: u32 = 0x087d_6074;
-        const EXPECTED_VERSION: u8 = 5;
+        const EXPECTED_HASH: u32 = 0x97ae_bc54;
+        const EXPECTED_VERSION: u8 = 6;
 
         assert_eq!(
             PRESET_SCHEMA_VERSION, EXPECTED_VERSION,

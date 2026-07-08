@@ -1114,6 +1114,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
 
@@ -1149,6 +1150,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
 
@@ -1499,6 +1501,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
 

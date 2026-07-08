@@ -209,6 +209,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         encoders
@@ -220,6 +221,7 @@ mod tests {
                     increment: 65,
                     decrement: 63,
                 },
+                ..Default::default()
             })
             .ok();
         Preset {

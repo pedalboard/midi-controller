@@ -683,6 +683,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -724,6 +725,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -762,6 +764,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -796,6 +799,7 @@ mod tests {
                     min: 0,
                     max: 100,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -829,6 +833,7 @@ mod tests {
                     min: 20,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -868,6 +873,7 @@ mod tests {
                     increment: 65,
                     decrement: 63,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -903,6 +909,7 @@ mod tests {
             .push(EncoderConfig {
                 label: Label::try_from("Bank").unwrap(),
                 action: EncoderAction::PresetScroll,
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
@@ -964,6 +971,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         encoders
@@ -975,6 +983,7 @@ mod tests {
                     min: 0,
                     max: 127,
                 },
+                ..Default::default()
             })
             .ok();
         let preset: Preset = Preset {
