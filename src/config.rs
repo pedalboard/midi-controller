@@ -141,6 +141,8 @@ impl GlobalConfig {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub global: GlobalConfig,
     pub presets: Vec<Preset, MAX_PRESETS>,
 }
 
@@ -470,6 +472,7 @@ mod tests {
     #[test]
     fn serialize_roundtrip_morningstar_style() {
         let config = Config {
+            global: GlobalConfig::default(),
             presets: {
                 let mut p = Vec::new();
                 let _ = p.push(Preset {

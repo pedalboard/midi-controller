@@ -31,13 +31,9 @@ pub enum InputEvent {
     ButtonEdge { index: u8, edge: Edge },
     /// Encoder detent (index 0..1).
     EncoderTurn { index: u8, clockwise: bool },
-    /// Analog input (expression pedal). Raw ADC value with calibration.
-    Analog {
-        index: u8,
-        raw: u16,
-        min: u16,
-        max: u16,
-    },
+    /// Analog input (expression pedal). Raw ADC value.
+    /// Calibration (min/max) is read from Config.global.
+    Analog { index: u8, raw: u16 },
     /// Incoming MIDI (for trigger processing). Up to 3 bytes.
     IncomingMidi { data: [u8; 3], len: u8 },
     /// Periodic tick — drives long-press detection. Send every 1-10ms.
@@ -138,12 +134,7 @@ impl Controller {
             InputEvent::EncoderTurn { index, clockwise } => {
                 self.process_encoder(index as usize, clockwise, now_ms, config)
             }
-            InputEvent::Analog {
-                index,
-                raw,
-                min,
-                max,
-            } => self.process_analog(index as usize, raw, min, max, config),
+            InputEvent::Analog { index, raw } => self.process_analog(index as usize, raw, config),
             InputEvent::IncomingMidi { data, len } => {
                 self.do_process_incoming_midi(&data[..len as usize], config)
             }
@@ -449,18 +440,16 @@ impl Controller {
         result
     }
 
-    fn process_analog(
-        &mut self,
-        index: usize,
-        raw: u16,
-        min: u16,
-        max: u16,
-        config: &Config,
-    ) -> ControllerResult {
+    fn process_analog(&mut self, index: usize, raw: u16, config: &Config) -> ControllerResult {
         let mut result = ControllerResult::new();
         let preset = match self.current_preset(config) {
             Some(p) => p,
             None => return result,
+        };
+        let (min, max) = match index {
+            0 => (config.global.exp1_min, config.global.exp1_max),
+            1 => (config.global.exp2_min, config.global.exp2_max),
+            _ => return result,
         };
         let r = engine::process_analog(preset, index, raw, min, max);
         self.merge_engine_result(&r, &mut result);
