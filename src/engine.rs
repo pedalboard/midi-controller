@@ -7,8 +7,6 @@ use crate::config::{
 };
 use crate::state::PresetState;
 
-const NUM_BUTTONS: usize = 6;
-
 /// Abstract button event after long-press detection is resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonEvent {
@@ -89,9 +87,9 @@ impl EngineResult {
 }
 
 /// Process a button event. Updates state and returns MIDI/system/display actions.
-pub fn process_button(
-    state: &mut PresetState,
-    preset: &Preset,
+pub fn process_button<const B: usize, const E: usize, const A: usize>(
+    state: &mut PresetState<B, E>,
+    preset: &Preset<B, E, A>,
     btn_idx: usize,
     event: ButtonEvent,
 ) -> EngineResult {
@@ -136,7 +134,7 @@ pub fn process_button(
                 );
             }
             ButtonMode::RadioGroup(group) => {
-                for j in 0..NUM_BUTTONS {
+                for j in 0..B {
                     if j != btn_idx {
                         if let Some(other) = preset.buttons.get(j) {
                             if other.mode == ButtonMode::RadioGroup(*group) {
@@ -184,9 +182,9 @@ pub fn process_button(
 }
 
 /// Process an encoder change. Applies steps, returns MIDI + display event.
-pub fn process_encoder(
-    state: &mut PresetState,
-    preset: &Preset,
+pub fn process_encoder<const B: usize, const E: usize, const A: usize>(
+    state: &mut PresetState<B, E>,
+    preset: &Preset<B, E, A>,
     enc_idx: usize,
     direction: EncoderDirection,
     steps: u8,
@@ -266,8 +264,8 @@ pub fn process_encoder(
 }
 
 /// Process an analog input change. Returns MIDI + display event.
-pub fn process_analog(
-    preset: &Preset,
+pub fn process_analog<const B: usize, const E: usize, const A: usize>(
+    preset: &Preset<B, E, A>,
     analog_idx: usize,
     raw: u16,
     adc_min: u16,
@@ -386,9 +384,9 @@ pub struct TriggerResult {
 }
 
 /// Process incoming MIDI against preset triggers. Updates button state directly.
-pub fn process_triggers(
-    state: &mut PresetState,
-    preset: &Preset,
+pub fn process_triggers<const B: usize, const E: usize, const A: usize>(
+    state: &mut PresetState<B, E>,
+    preset: &Preset<B, E, A>,
     status: u8,
     data1: u8,
     data2: u8,
@@ -480,8 +478,8 @@ pub enum ReactiveResult {
 }
 
 /// Check incoming CC against preset's reactive LED bindings.
-pub fn process_incoming_cc(
-    preset: &Preset,
+pub fn process_incoming_cc<const B: usize, const E: usize, const A: usize>(
+    preset: &Preset<B, E, A>,
     channel: u8,
     cc: u8,
     value: u8,
@@ -581,7 +579,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -619,7 +617,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -653,7 +651,7 @@ mod tests {
                 })
                 .ok();
         }
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -687,7 +685,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -728,7 +726,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -766,7 +764,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -800,7 +798,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -833,7 +831,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -872,7 +870,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -907,7 +905,7 @@ mod tests {
                 action: EncoderAction::PresetScroll,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -936,7 +934,7 @@ mod tests {
 
     #[test]
     fn encoder_invalid_index_returns_empty() {
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders: heapless::Vec::new(),
@@ -979,7 +977,7 @@ mod tests {
                 },
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: heapless::Vec::new(),
             encoders,
@@ -1023,7 +1021,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -1072,7 +1070,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -1124,7 +1122,7 @@ mod tests {
                 }),
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -1174,7 +1172,7 @@ mod tests {
                 }),
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -1220,7 +1218,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -1270,7 +1268,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),
@@ -1405,7 +1403,7 @@ mod tests {
                 listen_cc: None,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons,
             encoders: heapless::Vec::new(),

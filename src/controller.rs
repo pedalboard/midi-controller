@@ -11,7 +11,7 @@
 //! is where `now_ms` comes from (hardware monotonic vs std::Instant).
 
 use crate::action::{action_to_midi, EncoderDirection};
-use crate::config::{Action, ButtonMode, Config, Preset};
+use crate::config::{Action, ButtonMode, Config, Preset, MAX_BUTTONS, MAX_ENCODERS};
 use crate::encoder_accel::EncoderAccel;
 use crate::engine::{
     self, process_triggers, ActionStep, ButtonEvent, DisplayEvent, EngineResult, SystemAction,
@@ -19,9 +19,6 @@ use crate::engine::{
 use crate::long_press::{Edge, Gesture, LongPressDetector};
 use crate::state::{PresetState, PresetStateStore};
 use crate::tap_tempo::TapTempo;
-
-const NUM_BUTTONS: usize = 6;
-const NUM_ENCODERS: usize = 2;
 
 /// Abstract input event. Hardware-agnostic — firmware maps GPIO edges to these,
 /// the simulator maps keyboard/WebSocket events to these.
@@ -83,41 +80,44 @@ impl Output {
 /// // Update display from result.display
 /// // Re-render LEDs if result.leds_changed
 /// ```
-pub struct Controller {
-    state_store: PresetStateStore,
-    long_press: [LongPressDetector; NUM_BUTTONS],
-    encoder_accel: [EncoderAccel; NUM_ENCODERS],
+pub struct Controller<const B: usize = MAX_BUTTONS, const E: usize = MAX_ENCODERS> {
+    state_store: PresetStateStore<B, E>,
+    long_press: [LongPressDetector; B],
+    encoder_accel: [EncoderAccel; E],
     tap_tempo: TapTempo,
-    button_active: [bool; NUM_BUTTONS],
+    button_active: [bool; B],
     active_preset: u8,
 }
 
-impl Default for Controller {
+/// Type alias for the default controller configuration (6 buttons, 2 encoders).
+pub type DefaultController = Controller<MAX_BUTTONS, MAX_ENCODERS>;
+
+impl<const B: usize, const E: usize> Default for Controller<B, E> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Controller {
+impl<const B: usize, const E: usize> Controller<B, E> {
     pub fn new() -> Self {
         Self {
             state_store: PresetStateStore::new(),
             long_press: core::array::from_fn(|_| LongPressDetector::new_fired()),
-            encoder_accel: [EncoderAccel::new(), EncoderAccel::new()],
+            encoder_accel: core::array::from_fn(|_| EncoderAccel::new()),
             tap_tempo: TapTempo::new(),
-            button_active: [false; NUM_BUTTONS],
+            button_active: [false; B],
             active_preset: 0,
         }
     }
 
     /// Create with a restored state store (from EEPROM/persistence).
-    pub fn with_state(store: PresetStateStore) -> Self {
+    pub fn with_state(store: PresetStateStore<B, E>) -> Self {
         let state = store.current().clone();
         let active = store.active_index();
         Self {
             state_store: store,
             long_press: core::array::from_fn(|_| LongPressDetector::new_fired()),
-            encoder_accel: [EncoderAccel::new(), EncoderAccel::new()],
+            encoder_accel: core::array::from_fn(|_| EncoderAccel::new()),
             tap_tempo: TapTempo::new(),
             button_active: state.button_active,
             active_preset: active,
@@ -126,7 +126,12 @@ impl Controller {
 
     /// Process a single input event. Returns all MIDI output, display events,
     /// and flags. System actions (preset switch, tap tempo) are handled internally.
-    pub fn process(&mut self, event: Event, now_ms: u32, config: &Config) -> Output {
+    pub fn process<const A: usize>(
+        &mut self,
+        event: Event,
+        now_ms: u32,
+        config: &Config<B, E, A>,
+    ) -> Output {
         let mut result = match event {
             Event::ButtonEdge { index, edge } => {
                 self.process_button(index as usize, edge, now_ms, config)
@@ -147,7 +152,7 @@ impl Controller {
         result
     }
 
-    fn do_tick(&mut self, now_ms: u32, config: &Config) -> Output {
+    fn do_tick<const A: usize>(&mut self, now_ms: u32, config: &Config<B, E, A>) -> Output {
         let mut result = Output::new();
 
         if !self.button_held() {
@@ -159,7 +164,7 @@ impl Controller {
             None => return result,
         };
 
-        for i in 0..NUM_BUTTONS {
+        for i in 0..B {
             if self.long_press[i].is_active() && !self.long_press[i].has_fired() {
                 let has_long_press = preset
                     .buttons
@@ -177,7 +182,11 @@ impl Controller {
         result
     }
 
-    fn do_process_incoming_midi(&mut self, raw: &[u8], config: &Config) -> Output {
+    fn do_process_incoming_midi<const A: usize>(
+        &mut self,
+        raw: &[u8],
+        config: &Config<B, E, A>,
+    ) -> Output {
         let mut result = Output::new();
 
         let preset = match config.presets.get(self.active_preset as usize) {
@@ -213,7 +222,7 @@ impl Controller {
     }
 
     /// Returns the current button active state (toggle ON / momentary held).
-    pub fn button_states(&self) -> &[bool; NUM_BUTTONS] {
+    pub fn button_states(&self) -> &[bool; B] {
         &self.button_active
     }
 
@@ -223,13 +232,13 @@ impl Controller {
     }
 
     /// Get the encoder values.
-    pub fn encoder_values(&self) -> [u8; NUM_ENCODERS] {
+    pub fn encoder_values(&self) -> [u8; E] {
         self.state_store.current().encoder_values
     }
 
     /// Get a snapshot of the state store (with current working state saved).
     /// Use this for persistence — the caller decides the serialization format.
-    pub fn snapshot_store(&self) -> PresetStateStore {
+    pub fn snapshot_store(&self) -> PresetStateStore<B, E> {
         let mut store = self.state_store.clone();
         let working = self.working_state();
         store.save_working(&working);
@@ -238,7 +247,11 @@ impl Controller {
 
     /// Manually switch to a preset (e.g., on boot or from external command).
     /// Returns on_enter + recall MIDI in the result.
-    pub fn select_preset(&mut self, preset_idx: u8, config: &Config) -> Output {
+    pub fn select_preset<const A: usize>(
+        &mut self,
+        preset_idx: u8,
+        config: &Config<B, E, A>,
+    ) -> Output {
         let mut result = Output::new();
         self.do_switch_preset(preset_idx, &mut result, config);
         result
@@ -247,7 +260,7 @@ impl Controller {
     /// Set encoder value (for initial state setup from config defaults).
     pub fn set_encoder_value(&mut self, index: usize, value: u8) {
         let mut state = self.state_store.current().clone();
-        if index < NUM_ENCODERS {
+        if index < E {
             state.encoder_values[index] = value;
         }
         self.state_store.save_working(&state);
@@ -255,11 +268,19 @@ impl Controller {
 
     // --- Private ---
 
-    fn current_preset<'a>(&self, config: &'a Config) -> Option<&'a Preset> {
+    fn current_preset<'a, const A: usize>(
+        &self,
+        config: &'a Config<B, E, A>,
+    ) -> Option<&'a Preset<B, E, A>> {
         config.presets.get(self.active_preset as usize)
     }
 
-    fn handle_system_actions(&mut self, result: &mut Output, now_ms: u32, config: &Config) {
+    fn handle_system_actions<const A: usize>(
+        &mut self,
+        result: &mut Output,
+        now_ms: u32,
+        config: &Config<B, E, A>,
+    ) {
         let actions: heapless::Vec<SystemAction, 2> = result.pending_system.clone();
         result.pending_system.clear();
         for action in &actions {
@@ -267,7 +288,13 @@ impl Controller {
         }
     }
 
-    fn process_button(&mut self, index: usize, edge: Edge, now_ms: u32, config: &Config) -> Output {
+    fn process_button<const A: usize>(
+        &mut self,
+        index: usize,
+        edge: Edge,
+        now_ms: u32,
+        config: &Config<B, E, A>,
+    ) -> Output {
         let mut result = Output::new();
 
         let preset = match self.current_preset(config) {
@@ -275,7 +302,7 @@ impl Controller {
             None => return result,
         };
 
-        if index >= NUM_BUTTONS {
+        if index >= B {
             return result;
         }
 
@@ -344,11 +371,11 @@ impl Controller {
         result
     }
 
-    fn handle_gesture(
+    fn handle_gesture<const A: usize>(
         &mut self,
         index: usize,
         gesture: Gesture,
-        preset: &Preset,
+        preset: &Preset<B, E, A>,
         result: &mut Output,
     ) {
         let mode = preset
@@ -388,12 +415,12 @@ impl Controller {
         }
     }
 
-    fn process_encoder(
+    fn process_encoder<const A: usize>(
         &mut self,
         index: usize,
         clockwise: bool,
         now_ms: u32,
-        config: &Config,
+        config: &Config<B, E, A>,
     ) -> Output {
         let mut result = Output::new();
         let preset = match self.current_preset(config) {
@@ -401,7 +428,7 @@ impl Controller {
             None => return result,
         };
 
-        if index >= NUM_ENCODERS {
+        if index >= E {
             return result;
         }
 
@@ -419,7 +446,12 @@ impl Controller {
         result
     }
 
-    fn process_analog(&mut self, index: usize, raw: u16, config: &Config) -> Output {
+    fn process_analog<const A: usize>(
+        &mut self,
+        index: usize,
+        raw: u16,
+        config: &Config<B, E, A>,
+    ) -> Output {
         let mut result = Output::new();
         let preset = match self.current_preset(config) {
             Some(p) => p,
@@ -446,22 +478,17 @@ impl Controller {
         if r.led_dirty {
             result.leds_changed = true;
         }
-        // System actions are collected — will be handled by the caller (process/tick)
-        // via handle_system_actions after the event processing completes.
-        // We store them temporarily in a hidden field... but Output doesn't
-        // have system anymore. Let's use a simpler approach:
-        // We handle them inline by storing in a temp vec on Output.
         for s in &r.system {
             result.pending_system.push(*s).ok();
         }
     }
 
-    fn execute_system_action(
+    fn execute_system_action<const A: usize>(
         &mut self,
         action: SystemAction,
         result: &mut Output,
         now_ms: u32,
-        config: &Config,
+        config: &Config<B, E, A>,
     ) {
         let num_presets = config.presets.iter().filter(|p| !p.name.is_empty()).count() as u8;
 
@@ -500,7 +527,12 @@ impl Controller {
         }
     }
 
-    fn do_switch_preset(&mut self, new_idx: u8, result: &mut Output, config: &Config) {
+    fn do_switch_preset<const A: usize>(
+        &mut self,
+        new_idx: u8,
+        result: &mut Output,
+        config: &Config<B, E, A>,
+    ) {
         let old_preset = config.presets.get(self.active_preset as usize);
         let new_preset = config.presets.get(new_idx as usize);
 
@@ -526,7 +558,7 @@ impl Controller {
             let recall = self.state_store.switch(new_idx, &mut working, new_p);
             self.apply_state(&working);
             self.long_press = core::array::from_fn(|_| LongPressDetector::new_fired());
-            self.encoder_accel = [EncoderAccel::new(), EncoderAccel::new()];
+            self.encoder_accel = core::array::from_fn(|_| EncoderAccel::new());
             self.active_preset = new_idx;
 
             // Fire on_enter for new preset
@@ -553,7 +585,7 @@ impl Controller {
         result.leds_changed = true;
     }
 
-    fn working_state(&self) -> PresetState {
+    fn working_state(&self) -> PresetState<B, E> {
         let current = self.state_store.current();
         PresetState {
             button_active: self.button_active,
@@ -562,7 +594,7 @@ impl Controller {
         }
     }
 
-    fn apply_state(&mut self, state: &PresetState) {
+    fn apply_state(&mut self, state: &PresetState<B, E>) {
         self.button_active = state.button_active;
         self.state_store.save_working(state);
     }
@@ -977,7 +1009,7 @@ mod tests {
                 triggers: HVec::new(),
             })
             .ok();
-        let config = Config {
+        let config: Config = Config {
             global: GlobalConfig::default(),
             presets,
         };
@@ -1321,7 +1353,7 @@ mod tests {
                 })
                 .ok();
         }
-        let config = Config {
+        let config: Config = Config {
             global: GlobalConfig::default(),
             presets,
         };
@@ -1407,7 +1439,7 @@ mod tests {
             })
             .ok();
 
-        let config = Config {
+        let config: Config = Config {
             global: GlobalConfig::default(),
             presets,
         };
@@ -1462,7 +1494,7 @@ mod tests {
             })
             .ok();
 
-        let config = Config {
+        let config: Config = Config {
             global: GlobalConfig::default(),
             presets,
         };

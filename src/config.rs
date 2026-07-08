@@ -140,21 +140,29 @@ impl GlobalConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Config {
+pub struct Config<
+    const B: usize = MAX_BUTTONS,
+    const E: usize = MAX_ENCODERS,
+    const A: usize = MAX_ANALOG,
+> {
     #[serde(default)]
     pub global: GlobalConfig,
-    pub presets: Vec<Preset, MAX_PRESETS>,
+    pub presets: Vec<Preset<B, E, A>, MAX_PRESETS>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Preset {
+pub struct Preset<
+    const B: usize = MAX_BUTTONS,
+    const E: usize = MAX_ENCODERS,
+    const A: usize = MAX_ANALOG,
+> {
     pub name: Label,
-    pub buttons: Vec<ButtonConfig, MAX_BUTTONS>,
-    pub encoders: Vec<EncoderConfig, MAX_ENCODERS>,
-    pub analog: Vec<AnalogConfig, MAX_ANALOG>,
+    pub buttons: Vec<ButtonConfig, B>,
+    pub encoders: Vec<EncoderConfig, E>,
+    pub analog: Vec<AnalogConfig, A>,
     /// Initial state applied on first boot / after upload (before any user interaction).
     #[serde(default)]
-    pub defaults: InitialState,
+    pub defaults: InitialState<B, E>,
     /// Actions fired when this preset becomes active (on switch or boot).
     #[serde(default)]
     pub on_enter: Vec<Action, MAX_ACTIONS>,
@@ -214,13 +222,13 @@ pub enum TriggerAction {
 
 /// Default toggle/radio/encoder state for a preset on first activation.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InitialState {
+pub struct InitialState<const B: usize = MAX_BUTTONS, const E: usize = MAX_ENCODERS> {
     /// Which buttons start active (true = on). Length matches buttons vec.
     #[serde(default)]
-    pub button_active: Vec<bool, MAX_BUTTONS>,
+    pub button_active: Vec<bool, B>,
     /// Initial encoder values (0-127). Length matches encoders vec.
     #[serde(default)]
-    pub encoder_values: Vec<u8, MAX_ENCODERS>,
+    pub encoder_values: Vec<u8, E>,
 }
 
 // --- Buttons ---
@@ -453,6 +461,13 @@ pub enum LedRenderer {
 
 // --- Defaults ---
 
+/// Type alias for the default preset configuration (6 buttons, 2 encoders, 2 analog).
+pub type DefaultPreset = Preset<MAX_BUTTONS, MAX_ENCODERS, MAX_ANALOG>;
+/// Type alias for the default system configuration.
+pub type DefaultConfig = Config<MAX_BUTTONS, MAX_ENCODERS, MAX_ANALOG>;
+/// Type alias for the default initial state.
+pub type DefaultInitialState = InitialState<MAX_BUTTONS, MAX_ENCODERS>;
+
 impl Default for LedConfig {
     fn default() -> Self {
         LedConfig {
@@ -471,7 +486,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip_morningstar_style() {
-        let config = Config {
+        let config: Config = Config {
             global: GlobalConfig::default(),
             presets: {
                 let mut p = Vec::new();
@@ -678,7 +693,7 @@ mod tests {
     #[test]
     fn preset_serialization_layout_is_stable() {
         // Canonical preset with all fields populated (maximizes change detection)
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::try_from("Stable").unwrap(),
             buttons: {
                 let mut b = Vec::new();

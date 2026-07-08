@@ -10,7 +10,10 @@ pub struct MidiMessage {
 }
 
 /// Execute on_press actions for a button index. Returns up to 8 MIDI messages.
-pub fn execute_button_press(preset: &Preset, btn_idx: usize) -> heapless::Vec<MidiMessage, 8> {
+pub fn execute_button_press<const B: usize, const E: usize, const A: usize>(
+    preset: &Preset<B, E, A>,
+    btn_idx: usize,
+) -> heapless::Vec<MidiMessage, 8> {
     let mut messages = heapless::Vec::new();
     let Some(btn) = preset.buttons.get(btn_idx) else {
         return messages;
@@ -46,8 +49,8 @@ pub enum EncoderDirection {
 
 /// Generate a CC message for an encoder pulse. `current_value` is updated in place.
 /// Returns None if the encoder has no action configured or uses PresetScroll.
-pub fn encoder_cc(
-    preset: &Preset,
+pub fn encoder_cc<const B: usize, const E: usize, const A: usize>(
+    preset: &Preset<B, E, A>,
     encoder_idx: usize,
     direction: EncoderDirection,
     current_value: &mut u8,
@@ -90,8 +93,8 @@ pub fn encoder_cc(
 }
 
 /// Generate a CC message for an analog input. `raw` is the ADC reading (0-4095).
-pub fn analog_cc(
-    preset: &Preset,
+pub fn analog_cc<const B: usize, const E: usize, const A: usize>(
+    preset: &Preset<B, E, A>,
     analog_idx: usize,
     raw: u16,
     adc_min: u16,
@@ -296,7 +299,7 @@ mod tests {
                 max: 127,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: Vec::new(),
             encoders: Vec::new(),
@@ -325,7 +328,7 @@ mod tests {
                 max: 100,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: Vec::new(),
             encoders: Vec::new(),
@@ -345,7 +348,7 @@ mod tests {
 
     #[test]
     fn analog_invalid_index_returns_none() {
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: Vec::new(),
             encoders: Vec::new(),
@@ -370,7 +373,7 @@ mod tests {
                 max: 127,
             })
             .ok();
-        let preset = Preset {
+        let preset: Preset = Preset {
             name: Label::new(),
             buttons: Vec::new(),
             encoders: Vec::new(),

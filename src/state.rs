@@ -2,40 +2,37 @@
 //! and generates recall MIDI on preset switch.
 
 use crate::action::{action_to_midi, MidiMessage};
-use crate::config::{EncoderAction, Preset, MAX_PRESETS};
-
-const NUM_BUTTONS: usize = 6;
-const NUM_ENCODERS: usize = 2;
+use crate::config::{EncoderAction, Preset, MAX_BUTTONS, MAX_ENCODERS, MAX_PRESETS};
 
 /// Runtime state for a single preset (not persisted across power cycles).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PresetState {
-    pub button_active: [bool; NUM_BUTTONS],
-    pub cycle_index: [u8; NUM_BUTTONS],
-    pub encoder_values: [u8; NUM_ENCODERS],
+pub struct PresetState<const B: usize = MAX_BUTTONS, const E: usize = MAX_ENCODERS> {
+    pub button_active: [bool; B],
+    pub cycle_index: [u8; B],
+    pub encoder_values: [u8; E],
 }
 
-impl Default for PresetState {
+impl<const B: usize, const E: usize> Default for PresetState<B, E> {
     fn default() -> Self {
         Self {
-            button_active: [false; NUM_BUTTONS],
-            cycle_index: [0; NUM_BUTTONS],
-            encoder_values: [0; NUM_ENCODERS],
+            button_active: [false; B],
+            cycle_index: [0; B],
+            encoder_values: [0; E],
         }
     }
 }
 
-impl PresetState {
+impl<const B: usize, const E: usize> PresetState<B, E> {
     /// Create a PresetState from a preset's declared defaults.
-    pub fn from_defaults(preset: &Preset) -> Self {
+    pub fn from_defaults<const A: usize>(preset: &Preset<B, E, A>) -> Self {
         let mut state = Self::default();
         for (i, &active) in preset.defaults.button_active.iter().enumerate() {
-            if i < NUM_BUTTONS {
+            if i < B {
                 state.button_active[i] = active;
             }
         }
         for (i, &val) in preset.defaults.encoder_values.iter().enumerate() {
-            if i < NUM_ENCODERS {
+            if i < E {
                 state.encoder_values[i] = val;
             }
         }
@@ -45,18 +42,18 @@ impl PresetState {
 
 /// Manages per-preset state and generates recall MIDI on switch.
 #[derive(Clone)]
-pub struct PresetStateStore {
-    states: [PresetState; MAX_PRESETS],
+pub struct PresetStateStore<const B: usize = MAX_BUTTONS, const E: usize = MAX_ENCODERS> {
+    states: [PresetState<B, E>; MAX_PRESETS],
     active: u8,
 }
 
-impl Default for PresetStateStore {
+impl<const B: usize, const E: usize> Default for PresetStateStore<B, E> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PresetStateStore {
+impl<const B: usize, const E: usize> PresetStateStore<B, E> {
     pub fn new() -> Self {
         Self {
             states: core::array::from_fn(|_| PresetState::default()),
@@ -65,12 +62,12 @@ impl PresetStateStore {
     }
 
     /// Get a reference to the current active preset's state.
-    pub fn current(&self) -> &PresetState {
+    pub fn current(&self) -> &PresetState<B, E> {
         &self.states[self.active as usize]
     }
 
     /// Get a mutable reference to the current active preset's state.
-    pub fn current_mut(&mut self) -> &mut PresetState {
+    pub fn current_mut(&mut self) -> &mut PresetState<B, E> {
         &mut self.states[self.active as usize]
     }
 
@@ -80,7 +77,7 @@ impl PresetStateStore {
     }
 
     /// Save working state into the active preset slot (for serialization without switching).
-    pub fn save_working(&mut self, working: &PresetState) {
+    pub fn save_working(&mut self, working: &PresetState<B, E>) {
         self.states[self.active as usize] = working.clone();
     }
 
@@ -90,7 +87,7 @@ impl PresetStateStore {
     }
 
     /// Set state for a specific preset slot.
-    pub fn set_state(&mut self, index: usize, state: PresetState) {
+    pub fn set_state(&mut self, index: usize, state: PresetState<B, E>) {
         if index < MAX_PRESETS {
             self.states[index] = state;
         }
@@ -98,7 +95,7 @@ impl PresetStateStore {
 
     /// Reset state using preset defaults (after upload / first boot).
     /// Each preset's declared initial state is applied.
-    pub fn apply_defaults(&mut self, presets: &[&Preset]) {
+    pub fn apply_defaults<const A: usize>(&mut self, presets: &[&Preset<B, E, A>]) {
         for (i, preset) in presets.iter().enumerate() {
             if i < MAX_PRESETS {
                 self.states[i] = PresetState::from_defaults(preset);
@@ -106,20 +103,13 @@ impl PresetStateStore {
         }
     }
 
-    /// Return a cleared EEPROM buffer (for writing after preset upload).
-    pub fn cleared_eeprom() -> [u8; 128] {
-        let mut buf = [0u8; 128];
-        Self::new().to_eeprom(&mut buf);
-        buf
-    }
-
     /// Switch to a new preset. Saves current working state, loads new state,
     /// and returns MIDI messages to recall the new preset's state to external gear.
-    pub fn switch(
+    pub fn switch<const A: usize>(
         &mut self,
         new_preset: u8,
-        working: &mut PresetState,
-        preset: &Preset,
+        working: &mut PresetState<B, E>,
+        preset: &Preset<B, E, A>,
     ) -> heapless::Vec<MidiMessage, 16> {
         let mut recall = heapless::Vec::new();
 
@@ -167,51 +157,78 @@ impl PresetStateStore {
 
 /// EEPROM magic encodes format version in the low nibble: 0xE0 | version.
 /// Bump EEPROM_VERSION when PresetState layout changes (field count, order, size).
-const EEPROM_VERSION: u8 = 1;
+const EEPROM_VERSION: u8 = 2;
 const EEPROM_MAGIC: u8 = 0xE0 | EEPROM_VERSION;
 const EEPROM_HEADER_SIZE: usize = 2; // magic + active_preset
-const PRESET_STATE_SIZE: usize = 14; // 6 bools + 6 cycle + 2 encoder
-/// Maximum presets that fit in 128 bytes
-pub const EEPROM_MAX_PRESETS: usize = (128 - EEPROM_HEADER_SIZE) / PRESET_STATE_SIZE; // = 9
 
-impl PresetState {
-    /// Serialize to a 14-byte buffer.
-    pub fn to_bytes(&self, buf: &mut [u8; PRESET_STATE_SIZE]) {
+/// Compute the serialized size of a single PresetState<B, E>.
+/// Layout: B bools + B cycle_indices + E encoder_values = B*2 + E bytes.
+const fn preset_state_size(b: usize, e: usize) -> usize {
+    b * 2 + e
+}
+
+/// Maximum presets that fit in 128 bytes for the default configuration.
+pub const EEPROM_MAX_PRESETS: usize =
+    (128 - EEPROM_HEADER_SIZE) / preset_state_size(MAX_BUTTONS, MAX_ENCODERS); // = 9
+
+impl<const B: usize, const E: usize> PresetState<B, E> {
+    /// Serialized byte size for this configuration.
+    pub const SIZE: usize = preset_state_size(B, E);
+
+    /// Serialize to a fixed-size buffer.
+    pub fn to_bytes(&self, buf: &mut [u8]) {
+        debug_assert!(buf.len() >= Self::SIZE);
         for (i, &active) in self.button_active.iter().enumerate() {
             buf[i] = active as u8;
         }
-        buf[NUM_BUTTONS..NUM_BUTTONS * 2].copy_from_slice(&self.cycle_index);
-        buf[12] = self.encoder_values[0];
-        buf[13] = self.encoder_values[1];
+        for (i, &idx) in self.cycle_index.iter().enumerate() {
+            buf[B + i] = idx;
+        }
+        for (i, &val) in self.encoder_values.iter().enumerate() {
+            buf[B * 2 + i] = val;
+        }
     }
 
-    /// Deserialize from a 14-byte buffer.
-    pub fn from_bytes(buf: &[u8; PRESET_STATE_SIZE]) -> Self {
+    /// Deserialize from a byte buffer.
+    pub fn from_bytes(buf: &[u8]) -> Self {
+        debug_assert!(buf.len() >= Self::SIZE);
         let mut state = Self::default();
-        for (i, &b) in buf[..NUM_BUTTONS].iter().enumerate() {
+        for (i, &b) in buf[..B].iter().enumerate() {
             state.button_active[i] = b != 0;
         }
-        state
-            .cycle_index
-            .copy_from_slice(&buf[NUM_BUTTONS..NUM_BUTTONS * 2]);
-        state.encoder_values[0] = buf[12];
-        state.encoder_values[1] = buf[13];
+        state.cycle_index[..B].copy_from_slice(&buf[B..B * 2]);
+        for (i, &b) in buf[B * 2..B * 2 + E].iter().enumerate() {
+            state.encoder_values[i] = b;
+        }
         state
     }
 }
 
-impl PresetStateStore {
+impl<const B: usize, const E: usize> PresetStateStore<B, E> {
+    /// Maximum presets that fit in 128 bytes for this configuration.
+    pub const EEPROM_MAX_PRESETS: usize = (128 - EEPROM_HEADER_SIZE) / preset_state_size(B, E);
+
+    /// Return a cleared EEPROM buffer (for writing after preset upload).
+    pub fn cleared_eeprom() -> [u8; 128] {
+        let mut buf = [0u8; 128];
+        Self::new().to_eeprom(&mut buf);
+        buf
+    }
+
     /// Serialize entire store to EEPROM buffer (128 bytes).
     /// Layout: [magic][active_preset][state0..stateN]
     pub fn to_eeprom(&self, buf: &mut [u8; 128]) {
         buf.fill(0xFF);
         buf[0] = EEPROM_MAGIC;
         buf[1] = self.active;
-        for i in 0..EEPROM_MAX_PRESETS {
-            let offset = EEPROM_HEADER_SIZE + i * PRESET_STATE_SIZE;
-            let mut state_buf = [0u8; PRESET_STATE_SIZE];
-            self.states[i].to_bytes(&mut state_buf);
-            buf[offset..offset + PRESET_STATE_SIZE].copy_from_slice(&state_buf);
+        let state_size = PresetState::<B, E>::SIZE;
+        let max_presets = Self::EEPROM_MAX_PRESETS;
+        for i in 0..max_presets {
+            let offset = EEPROM_HEADER_SIZE + i * state_size;
+            if offset + state_size > 128 {
+                break;
+            }
+            self.states[i].to_bytes(&mut buf[offset..offset + state_size]);
         }
     }
 
@@ -222,15 +239,23 @@ impl PresetStateStore {
         }
         let mut store = Self::new();
         store.active = buf[1];
-        for i in 0..EEPROM_MAX_PRESETS {
-            let offset = EEPROM_HEADER_SIZE + i * PRESET_STATE_SIZE;
-            let state_buf: &[u8; PRESET_STATE_SIZE] =
-                buf[offset..offset + PRESET_STATE_SIZE].try_into().ok()?;
-            store.states[i] = PresetState::from_bytes(state_buf);
+        let state_size = PresetState::<B, E>::SIZE;
+        let max_presets = Self::EEPROM_MAX_PRESETS;
+        for i in 0..max_presets {
+            let offset = EEPROM_HEADER_SIZE + i * state_size;
+            if offset + state_size > 128 {
+                break;
+            }
+            store.states[i] = PresetState::from_bytes(&buf[offset..offset + state_size]);
         }
         Some(store)
     }
 }
+
+/// Type alias for the default preset state (6 buttons, 2 encoders).
+pub type DefaultPresetState = PresetState<MAX_BUTTONS, MAX_ENCODERS>;
+/// Type alias for the default preset state store.
+pub type DefaultPresetStateStore = PresetStateStore<MAX_BUTTONS, MAX_ENCODERS>;
 
 #[cfg(test)]
 mod tests {
@@ -285,7 +310,7 @@ mod tests {
     #[test]
     fn switch_saves_and_restores_state() {
         let preset = make_preset();
-        let mut store = PresetStateStore::new();
+        let mut store: PresetStateStore = PresetStateStore::new();
         let mut working = PresetState::default();
 
         // Activate toggle in preset 0
@@ -306,7 +331,7 @@ mod tests {
     #[test]
     fn recall_sends_active_button_on_press() {
         let preset = make_preset();
-        let mut store = PresetStateStore::new();
+        let mut store: PresetStateStore = PresetStateStore::new();
         let mut working = PresetState::default();
 
         // Set button active in preset 0, switch away, switch back
@@ -321,7 +346,7 @@ mod tests {
     #[test]
     fn recall_sends_inactive_button_on_release() {
         let preset = make_preset();
-        let mut store = PresetStateStore::new();
+        let mut store: PresetStateStore = PresetStateStore::new();
         let mut working = PresetState::default();
 
         // Button inactive in preset 0 (default), switch away, switch back
@@ -335,7 +360,7 @@ mod tests {
     #[test]
     fn recall_sends_encoder_cc() {
         let preset = make_preset();
-        let mut store = PresetStateStore::new();
+        let mut store: PresetStateStore = PresetStateStore::new();
         let mut working = PresetState::default();
 
         working.encoder_values[0] = 64;
@@ -348,7 +373,7 @@ mod tests {
 
     #[test]
     fn eeprom_roundtrip() {
-        let mut store = PresetStateStore::new();
+        let mut store: PresetStateStore = PresetStateStore::new();
         store.states[0].button_active[0] = true;
         store.states[0].button_active[3] = true;
         store.states[0].cycle_index[2] = 5;
@@ -360,7 +385,7 @@ mod tests {
         let mut buf = [0u8; 128];
         store.to_eeprom(&mut buf);
 
-        let restored = PresetStateStore::from_eeprom(&buf).unwrap();
+        let restored: PresetStateStore = PresetStateStore::from_eeprom(&buf).unwrap();
         assert_eq!(restored.active_index(), 1);
         assert!(restored.states[0].button_active[0]);
         assert!(restored.states[0].button_active[3]);
@@ -373,7 +398,7 @@ mod tests {
     #[test]
     fn eeprom_invalid_magic_returns_none() {
         let buf = [0xFFu8; 128];
-        assert!(PresetStateStore::from_eeprom(&buf).is_none());
+        assert!(PresetStateStore::<MAX_BUTTONS, MAX_ENCODERS>::from_eeprom(&buf).is_none());
     }
 
     #[test]
