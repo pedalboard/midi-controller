@@ -51,6 +51,12 @@ pub struct Output {
     pub preset_changed: bool,
     /// BPM computed from tap tempo (if any).
     pub bpm: Option<u16>,
+    /// Mon indicator LED: flashes on MIDI activity.
+    /// Green = MIDI output generated, Blue = incoming MIDI processed.
+    pub mon_led: Option<crate::led::Rgb>,
+    /// Mode indicator LED: color represents the active preset/bank.
+    /// Set on preset change; None means no change.
+    pub mode_led: Option<crate::led::Rgb>,
     /// Internal: pending system actions to be handled by the controller.
     pending_system: heapless::Vec<SystemAction, 2>,
 }
@@ -63,6 +69,8 @@ impl Output {
             leds_changed: false,
             preset_changed: false,
             bpm: None,
+            mon_led: None,
+            mode_led: None,
             pending_system: heapless::Vec::new(),
         }
     }
@@ -148,6 +156,15 @@ impl<const B: usize, const E: usize> Controller<B, E> {
 
         // Handle system actions produced by event processing
         self.handle_system_actions(&mut result, now_ms, config);
+
+        // Indicator LEDs
+        if !result.midi.is_empty() {
+            // Green flash: MIDI output generated
+            result.mon_led = Some(crate::led::Rgb::new(0, 255, 0));
+        } else if matches!(event, Event::IncomingMidi { .. }) {
+            // Blue flash: incoming MIDI processed (even if no output)
+            result.mon_led = Some(crate::led::Rgb::new(0, 0, 255));
+        }
 
         result
     }
@@ -267,6 +284,22 @@ impl<const B: usize, const E: usize> Controller<B, E> {
     }
 
     // --- Private ---
+
+    /// Map preset index to a distinct indicator color.
+    /// Cycles through 8 hues so each bank/preset is visually distinct.
+    fn preset_color(index: u8) -> crate::led::Rgb {
+        match index % 8 {
+            0 => crate::led::Rgb::new(255, 0, 0),     // red
+            1 => crate::led::Rgb::new(0, 255, 0),     // green
+            2 => crate::led::Rgb::new(0, 0, 255),     // blue
+            3 => crate::led::Rgb::new(255, 255, 0),   // yellow
+            4 => crate::led::Rgb::new(255, 0, 255),   // magenta
+            5 => crate::led::Rgb::new(0, 255, 255),   // cyan
+            6 => crate::led::Rgb::new(255, 128, 0),   // orange
+            7 => crate::led::Rgb::new(128, 0, 255),   // purple
+            _ => crate::led::Rgb::new(255, 255, 255), // unreachable
+        }
+    }
 
     fn current_preset<'a, const A: usize>(
         &self,
@@ -583,6 +616,7 @@ impl<const B: usize, const E: usize> Controller<B, E> {
 
         result.preset_changed = true;
         result.leds_changed = true;
+        result.mode_led = Some(Self::preset_color(self.active_preset));
     }
 
     fn working_state(&self) -> PresetState<B, E> {
@@ -1649,5 +1683,62 @@ mod tests {
 
         assert!(result.preset_changed);
         assert_eq!(ctrl2.active_preset(), 0); // wraps from 2 → 0
+    }
+
+    #[test]
+    fn mon_led_green_on_midi_output() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(10, 127, 1).unwrap()).ok();
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons.push(momentary_button(on_press, HVec::new())).ok();
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            100,
+            &config,
+        );
+        assert!(!result.midi.is_empty());
+        assert_eq!(result.mon_led, Some(crate::led::Rgb::new(0, 255, 0)));
+    }
+
+    #[test]
+    fn mon_led_blue_on_incoming_midi() {
+        let config = make_config(HVec::new(), HVec::new());
+        let mut ctrl = Controller::new();
+
+        let result = ctrl.process(
+            Event::IncomingMidi {
+                data: [0xB0, 10, 127],
+                len: 3,
+            },
+            100,
+            &config,
+        );
+        assert_eq!(result.mon_led, Some(crate::led::Rgb::new(0, 0, 255)));
+    }
+
+    #[test]
+    fn mode_led_set_on_preset_change() {
+        let config = make_three_preset_config();
+        let mut ctrl = Controller::new();
+
+        let result = ctrl.select_preset(1, &config);
+        assert!(result.preset_changed);
+        // Preset 1 = green (index 1 in the color table)
+        assert_eq!(result.mode_led, Some(crate::led::Rgb::new(0, 255, 0)));
+    }
+
+    #[test]
+    fn mon_led_none_on_tick() {
+        let config = make_config(HVec::new(), HVec::new());
+        let mut ctrl = Controller::new();
+        let result = ctrl.process(Event::Tick, 100, &config);
+        assert_eq!(result.mon_led, None);
+        assert_eq!(result.mode_led, None);
     }
 }
