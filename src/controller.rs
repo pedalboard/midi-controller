@@ -567,3 +567,1055 @@ impl Controller {
         self.state_store.save_working(state);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::*;
+    use heapless::Vec as HVec;
+
+    // --- Helpers ---
+
+    /// Build a minimal config with one preset containing the given buttons and encoders.
+    fn make_config(
+        buttons: HVec<ButtonConfig, MAX_BUTTONS>,
+        encoders: HVec<EncoderConfig, MAX_ENCODERS>,
+    ) -> Config {
+        make_config_with_presets(buttons, encoders, HVec::new(), HVec::new(), HVec::new())
+    }
+
+    fn make_config_with_presets(
+        buttons: HVec<ButtonConfig, MAX_BUTTONS>,
+        encoders: HVec<EncoderConfig, MAX_ENCODERS>,
+        on_enter: HVec<Action, MAX_ACTIONS>,
+        on_exit: HVec<Action, MAX_ACTIONS>,
+        triggers: HVec<Trigger, MAX_TRIGGERS>,
+    ) -> Config {
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        presets
+            .push(Preset {
+                name: Label::try_from("P1").unwrap(),
+                buttons,
+                encoders,
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter,
+                on_exit,
+                triggers,
+            })
+            .ok();
+        Config {
+            global: GlobalConfig::default(),
+            presets,
+        }
+    }
+
+    fn make_two_preset_config() -> Config {
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+
+        // Preset 0: one toggle button with CC#80
+        let mut buttons0: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press0: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press0.push(Action::cc(80, 127, 1).unwrap()).ok();
+        let mut on_release0: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_release0.push(Action::cc(80, 0, 1).unwrap()).ok();
+        buttons0
+            .push(ButtonConfig {
+                label: Label::try_from("FX1").unwrap(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Toggle,
+                on_press: on_press0,
+                on_release: on_release0,
+                on_long_press: HVec::new(),
+                cycle_values: HVec::new(),
+                listen_cc: None,
+            })
+            .ok();
+
+        let mut on_enter0: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_enter0.push(Action::program_change(0, 1).unwrap()).ok();
+
+        presets
+            .push(Preset {
+                name: Label::try_from("Preset0").unwrap(),
+                buttons: buttons0,
+                encoders: HVec::new(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: on_enter0,
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+
+        // Preset 1: one momentary button with CC#81
+        let mut buttons1: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press1: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press1.push(Action::cc(81, 127, 1).unwrap()).ok();
+        buttons1
+            .push(ButtonConfig {
+                label: Label::try_from("FX2").unwrap(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press: on_press1,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                cycle_values: HVec::new(),
+                listen_cc: None,
+            })
+            .ok();
+
+        let mut on_enter1: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_enter1.push(Action::program_change(1, 1).unwrap()).ok();
+
+        presets
+            .push(Preset {
+                name: Label::try_from("Preset1").unwrap(),
+                buttons: buttons1,
+                encoders: HVec::new(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: on_enter1,
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+
+        Config {
+            global: GlobalConfig::default(),
+            presets,
+        }
+    }
+
+    fn make_three_preset_config() -> Config {
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        for i in 0..3u8 {
+            let mut on_enter: HVec<Action, MAX_ACTIONS> = HVec::new();
+            on_enter.push(Action::program_change(i, 1).unwrap()).ok();
+            presets
+                .push(Preset {
+                    name: Label::try_from("P").unwrap(),
+                    buttons: HVec::new(),
+                    encoders: HVec::new(),
+                    analog: HVec::new(),
+                    defaults: Default::default(),
+                    on_enter,
+                    on_exit: HVec::new(),
+                    triggers: HVec::new(),
+                })
+                .ok();
+        }
+        Config {
+            global: GlobalConfig::default(),
+            presets,
+        }
+    }
+
+    fn momentary_button(
+        on_press: HVec<Action, MAX_ACTIONS>,
+        on_release: HVec<Action, MAX_ACTIONS>,
+    ) -> ButtonConfig {
+        ButtonConfig {
+            label: Label::new(),
+            color: LedConfig::default(),
+            mode: ButtonMode::Momentary,
+            on_press,
+            on_release,
+            on_long_press: HVec::new(),
+            cycle_values: HVec::new(),
+            listen_cc: None,
+        }
+    }
+
+    fn momentary_button_with_long_press(
+        on_press: HVec<Action, MAX_ACTIONS>,
+        on_long_press: HVec<Action, MAX_ACTIONS>,
+    ) -> ButtonConfig {
+        ButtonConfig {
+            label: Label::new(),
+            color: LedConfig::default(),
+            mode: ButtonMode::Momentary,
+            on_press,
+            on_release: HVec::new(),
+            on_long_press,
+            cycle_values: HVec::new(),
+            listen_cc: None,
+        }
+    }
+
+    fn has_midi_msg(output: &Output, expected: [u8; 3]) -> bool {
+        output
+            .midi
+            .iter()
+            .any(|step| matches!(step, ActionStep::Send(m) if m.data == expected))
+    }
+
+    // --- Test 1: Simple button press generates MIDI (no long-press configured) ---
+
+    #[test]
+    fn simple_button_press_generates_midi() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons.push(momentary_button(on_press, HVec::new())).ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        assert!(has_midi_msg(&result, [0xB0, 80, 127]));
+        assert!(result.leds_changed);
+    }
+
+    // --- Test 2: Button release generates MIDI ---
+
+    #[test]
+    fn button_release_generates_midi() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+        let mut on_release: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_release.push(Action::cc(80, 0, 1).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons.push(momentary_button(on_press, on_release)).ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        // Press
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        // Release
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Deactivate,
+            },
+            100,
+            &config,
+        );
+
+        assert!(has_midi_msg(&result, [0xB0, 80, 0]));
+    }
+
+    // --- Test 3: Short press with long-press configured ---
+
+    #[test]
+    fn short_press_with_long_press_configured_fires_on_press_on_release() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+        let mut on_long_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_long_press.push(Action::PresetNext).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(momentary_button_with_long_press(on_press, on_long_press))
+            .ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        // Press at t=0
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        // With long-press configured, press is deferred — no MIDI yet
+        assert!(!has_midi_msg(&result, [0xB0, 80, 127]));
+
+        // Tick at t=200 (under 500ms threshold)
+        let result = ctrl.process(Event::Tick, 200, &config);
+        assert!(result.midi.is_empty());
+
+        // Release at t=300 (<500ms = short press)
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Deactivate,
+            },
+            300,
+            &config,
+        );
+
+        // Short press fires on_press actions
+        assert!(has_midi_msg(&result, [0xB0, 80, 127]));
+    }
+
+    // --- Test 4: Long press fires on_long_press actions ---
+
+    #[test]
+    fn long_press_fires_on_long_press_actions() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+        let mut on_long_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_long_press.push(Action::cc(99, 127, 2).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(momentary_button_with_long_press(on_press, on_long_press))
+            .ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        // Press at t=0
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        // Tick at t=500 (threshold reached)
+        let result = ctrl.process(Event::Tick, 500, &config);
+
+        // Long press fires on_long_press: CC#99 on ch2
+        assert!(has_midi_msg(&result, [0xB1, 99, 127]));
+    }
+
+    // --- Test 5: Long press suppresses short press ---
+
+    #[test]
+    fn long_press_suppresses_short_press_on_release() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+        let mut on_long_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_long_press.push(Action::cc(99, 127, 2).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(momentary_button_with_long_press(on_press, on_long_press))
+            .ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        // Press at t=0
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        // Long press fires at t=500
+        ctrl.process(Event::Tick, 500, &config);
+
+        // Release after long press
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Deactivate,
+            },
+            600,
+            &config,
+        );
+
+        // Release should NOT fire on_press (suppressed)
+        assert!(!has_midi_msg(&result, [0xB0, 80, 127]));
+        assert!(result.midi.is_empty());
+    }
+
+    // --- Test 6: Long press triggers preset switch ---
+
+    #[test]
+    fn long_press_triggers_preset_switch() {
+        let mut on_long_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_long_press.push(Action::PresetNext).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(momentary_button_with_long_press(HVec::new(), on_long_press))
+            .ok();
+
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        presets
+            .push(Preset {
+                name: Label::try_from("P1").unwrap(),
+                buttons,
+                encoders: HVec::new(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: HVec::new(),
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+        presets
+            .push(Preset {
+                name: Label::try_from("P2").unwrap(),
+                buttons: HVec::new(),
+                encoders: HVec::new(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: HVec::new(),
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+        let config = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl = Controller::new();
+
+        assert_eq!(ctrl.active_preset(), 0);
+
+        // Press at t=0
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        // Long press fires at t=500 → PresetNext
+        let result = ctrl.process(Event::Tick, 500, &config);
+
+        assert!(result.preset_changed);
+        assert_eq!(ctrl.active_preset(), 1);
+    }
+
+    // --- Test 7: Toggle state preserved across preset switch round-trip ---
+
+    #[test]
+    fn toggle_state_preserved_across_preset_switch() {
+        let config = make_two_preset_config();
+        let mut ctrl = Controller::new();
+
+        // Toggle button 0 ON in preset 0 (no long-press → immediate fire)
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        assert!(has_midi_msg(&result, [0xB0, 80, 127]));
+        assert!(ctrl.button_states()[0]);
+
+        // Switch to preset 1
+        ctrl.select_preset(1, &config);
+        assert_eq!(ctrl.active_preset(), 1);
+        // Button state is for preset 1 now
+        assert!(!ctrl.button_states()[0]);
+
+        // Switch back to preset 0
+        ctrl.select_preset(0, &config);
+        assert_eq!(ctrl.active_preset(), 0);
+        // Toggle state should be restored
+        assert!(ctrl.button_states()[0]);
+    }
+
+    // --- Test 8: Encoder turn generates CC ---
+
+    #[test]
+    fn encoder_turn_generates_cc() {
+        let mut encoders: HVec<EncoderConfig, MAX_ENCODERS> = HVec::new();
+        encoders
+            .push(EncoderConfig {
+                label: Label::try_from("Vol").unwrap(),
+                action: EncoderAction::Cc {
+                    cc: 7,
+                    channel: 1,
+                    min: 0,
+                    max: 127,
+                },
+            })
+            .ok();
+
+        let config = make_config(HVec::new(), encoders);
+        let mut ctrl = Controller::new();
+        ctrl.set_encoder_value(0, 64);
+
+        let result = ctrl.process(
+            Event::EncoderTurn {
+                index: 0,
+                clockwise: true,
+            },
+            1000,
+            &config,
+        );
+
+        // First turn always gives 1 step (no prior timestamp for acceleration)
+        assert!(has_midi_msg(&result, [0xB0, 7, 65]));
+        assert_eq!(ctrl.encoder_values()[0], 65);
+    }
+
+    // --- Test 9: Encoder acceleration (fast turns → bigger steps) ---
+
+    #[test]
+    fn encoder_acceleration_fast_turns_bigger_steps() {
+        let mut encoders: HVec<EncoderConfig, MAX_ENCODERS> = HVec::new();
+        encoders
+            .push(EncoderConfig {
+                label: Label::try_from("Vol").unwrap(),
+                action: EncoderAction::Cc {
+                    cc: 7,
+                    channel: 1,
+                    min: 0,
+                    max: 127,
+                },
+            })
+            .ok();
+
+        let config = make_config(HVec::new(), encoders);
+        let mut ctrl = Controller::new();
+        ctrl.set_encoder_value(0, 50);
+
+        // First turn at t=0 (initializes, returns 1 step)
+        ctrl.process(
+            Event::EncoderTurn {
+                index: 0,
+                clockwise: true,
+            },
+            0,
+            &config,
+        );
+        assert_eq!(ctrl.encoder_values()[0], 51);
+
+        // Fast turn at t=30 (30ms interval → 4 steps from accel_curve)
+        let result = ctrl.process(
+            Event::EncoderTurn {
+                index: 0,
+                clockwise: true,
+            },
+            30,
+            &config,
+        );
+        // 51 + 4 = 55
+        assert_eq!(ctrl.encoder_values()[0], 55);
+        assert!(has_midi_msg(&result, [0xB0, 7, 55]));
+    }
+
+    // --- Test 10: Tap tempo via Action::TapTempo ---
+
+    #[test]
+    fn tap_tempo_fires_bpm() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::TapTempo).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons.push(momentary_button(on_press, HVec::new())).ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        // First tap at t=0 — no BPM yet (need at least 2)
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        assert_eq!(result.bpm, None);
+
+        // Release (not relevant for tap tempo, but needed for state)
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Deactivate,
+            },
+            50,
+            &config,
+        );
+
+        // Second tap at t=500 → 120 BPM
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            500,
+            &config,
+        );
+        assert_eq!(result.bpm, Some(120));
+    }
+
+    // --- Test 11: IncomingMidi triggers (CC trigger activates button) ---
+
+    #[test]
+    fn incoming_midi_trigger_activates_button() {
+        let mut triggers: HVec<Trigger, MAX_TRIGGERS> = HVec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 64,
+                    value_max: 127,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Toggle,
+                on_press: HVec::new(),
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                cycle_values: HVec::new(),
+                listen_cc: None,
+            })
+            .ok();
+
+        let config =
+            make_config_with_presets(buttons, HVec::new(), HVec::new(), HVec::new(), triggers);
+        let mut ctrl = Controller::new();
+
+        assert!(!ctrl.button_states()[0]);
+
+        // Send CC#100 = 127 on channel 1
+        let result = ctrl.process(
+            Event::IncomingMidi {
+                data: [0xB0, 100, 127],
+                len: 3,
+            },
+            0,
+            &config,
+        );
+
+        assert!(ctrl.button_states()[0]);
+        assert!(result.leds_changed);
+    }
+
+    // --- Test 12: Tick is no-op when no button held ---
+
+    #[test]
+    fn tick_is_noop_when_no_button_held() {
+        let mut on_long_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_long_press.push(Action::cc(99, 127, 1).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(momentary_button_with_long_press(HVec::new(), on_long_press))
+            .ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        // Tick without any button held
+        let result = ctrl.process(Event::Tick, 1000, &config);
+
+        assert!(result.midi.is_empty());
+        assert!(!result.leds_changed);
+        assert!(!result.preset_changed);
+        assert_eq!(result.bpm, None);
+    }
+
+    // --- Test 13: select_preset fires on_enter MIDI ---
+
+    #[test]
+    fn select_preset_fires_on_enter_midi() {
+        let config = make_two_preset_config();
+        let mut ctrl = Controller::new();
+
+        // Select preset 1 (has on_enter: PC#1 on ch1)
+        let result = ctrl.select_preset(1, &config);
+
+        assert!(result.preset_changed);
+        assert_eq!(ctrl.active_preset(), 1);
+        // on_enter for preset 1: Program Change 1 on channel 1
+        assert!(has_midi_msg(&result, [0xC0, 1, 0]));
+    }
+
+    // --- Test 14: button_held() tracks press/release ---
+
+    #[test]
+    fn button_held_tracks_press_release() {
+        // Must use a button with long-press configured (long-press detector tracks active state)
+        let mut on_long_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_long_press.push(Action::cc(99, 127, 1).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(momentary_button_with_long_press(HVec::new(), on_long_press))
+            .ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        assert!(!ctrl.button_held());
+
+        // Press
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        assert!(ctrl.button_held());
+
+        // Release
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Deactivate,
+            },
+            100,
+            &config,
+        );
+        assert!(!ctrl.button_held());
+    }
+
+    // --- Test 15: Preset prev wraps around ---
+
+    #[test]
+    fn preset_prev_wraps_around() {
+        // Build config with PresetPrev button in all 3 presets
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        for i in 0..3u8 {
+            let mut btn_on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+            btn_on_press.push(Action::PresetPrev).ok();
+            let mut btns: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+            btns.push(momentary_button(btn_on_press, HVec::new())).ok();
+
+            let mut on_enter: HVec<Action, MAX_ACTIONS> = HVec::new();
+            on_enter.push(Action::program_change(i, 1).unwrap()).ok();
+
+            presets
+                .push(Preset {
+                    name: Label::try_from("P").unwrap(),
+                    buttons: btns,
+                    encoders: HVec::new(),
+                    analog: HVec::new(),
+                    defaults: Default::default(),
+                    on_enter,
+                    on_exit: HVec::new(),
+                    triggers: HVec::new(),
+                })
+                .ok();
+        }
+        let config = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl = Controller::new();
+
+        assert_eq!(ctrl.active_preset(), 0);
+
+        // Press button → PresetPrev wraps from 0 → 2
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        assert!(result.preset_changed);
+        assert_eq!(ctrl.active_preset(), 2);
+    }
+
+    // --- Additional edge-case tests ---
+
+    #[test]
+    fn button_held_false_for_button_without_long_press() {
+        // A button without on_long_press doesn't use the long-press detector
+        // in "active" mode, so button_held() should remain false.
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons.push(momentary_button(on_press, HVec::new())).ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        // Without long-press, the detector doesn't track "active" — button_held returns false
+        assert!(!ctrl.button_held());
+    }
+
+    #[test]
+    fn select_preset_fires_on_exit_of_old_preset() {
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+
+        let mut on_exit: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_exit.push(Action::cc(123, 0, 1).unwrap()).ok(); // All Notes Off
+
+        presets
+            .push(Preset {
+                name: Label::try_from("P1").unwrap(),
+                buttons: HVec::new(),
+                encoders: HVec::new(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: HVec::new(),
+                on_exit,
+                triggers: HVec::new(),
+            })
+            .ok();
+
+        let mut on_enter: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_enter.push(Action::program_change(5, 1).unwrap()).ok();
+
+        presets
+            .push(Preset {
+                name: Label::try_from("P2").unwrap(),
+                buttons: HVec::new(),
+                encoders: HVec::new(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter,
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+
+        let config = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl = Controller::new();
+
+        let result = ctrl.select_preset(1, &config);
+
+        // on_exit of preset 0 should fire: CC#123=0 (All Notes Off)
+        assert!(has_midi_msg(&result, [0xB0, 123, 0]));
+        // on_enter of preset 1 should fire: PC#5
+        assert!(has_midi_msg(&result, [0xC0, 5, 0]));
+    }
+
+    #[test]
+    fn encoder_values_persist_across_preset_switch() {
+        let mut encoders: HVec<EncoderConfig, MAX_ENCODERS> = HVec::new();
+        encoders
+            .push(EncoderConfig {
+                label: Label::try_from("Vol").unwrap(),
+                action: EncoderAction::Cc {
+                    cc: 7,
+                    channel: 1,
+                    min: 0,
+                    max: 127,
+                },
+            })
+            .ok();
+
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        presets
+            .push(Preset {
+                name: Label::try_from("P1").unwrap(),
+                buttons: HVec::new(),
+                encoders: encoders.clone(),
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: HVec::new(),
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+        presets
+            .push(Preset {
+                name: Label::try_from("P2").unwrap(),
+                buttons: HVec::new(),
+                encoders,
+                analog: HVec::new(),
+                defaults: Default::default(),
+                on_enter: HVec::new(),
+                on_exit: HVec::new(),
+                triggers: HVec::new(),
+            })
+            .ok();
+
+        let config = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl = Controller::new();
+        ctrl.set_encoder_value(0, 80);
+
+        // Switch to preset 1
+        ctrl.select_preset(1, &config);
+        assert_eq!(ctrl.encoder_values()[0], 0); // fresh preset 1 state
+
+        // Switch back to preset 0
+        ctrl.select_preset(0, &config);
+        assert_eq!(ctrl.encoder_values()[0], 80); // restored
+    }
+
+    #[test]
+    fn snapshot_store_captures_current_state() {
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::cc(80, 127, 1).unwrap()).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Toggle,
+                on_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                cycle_values: HVec::new(),
+                listen_cc: None,
+            })
+            .ok();
+
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::new();
+        ctrl.set_encoder_value(0, 42);
+
+        // Toggle button on
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        let store = ctrl.snapshot_store();
+        let state = store.current();
+        assert!(state.button_active[0]);
+        assert_eq!(state.encoder_values[0], 42);
+    }
+
+    #[test]
+    fn incoming_midi_trigger_below_value_min_no_match() {
+        let mut triggers: HVec<Trigger, MAX_TRIGGERS> = HVec::new();
+        triggers
+            .push(Trigger {
+                match_msg: TriggerMatch::Cc {
+                    cc: 100,
+                    channel: 1,
+                    value_min: 64,
+                    value_max: 127,
+                },
+                action: TriggerAction::Activate(0),
+            })
+            .ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Toggle,
+                on_press: HVec::new(),
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                cycle_values: HVec::new(),
+                listen_cc: None,
+            })
+            .ok();
+
+        let config =
+            make_config_with_presets(buttons, HVec::new(), HVec::new(), HVec::new(), triggers);
+        let mut ctrl = Controller::new();
+
+        // Send CC#100 = 63 (below value_min=64)
+        let result = ctrl.process(
+            Event::IncomingMidi {
+                data: [0xB0, 100, 63],
+                len: 3,
+            },
+            0,
+            &config,
+        );
+
+        assert!(!ctrl.button_states()[0]);
+        assert!(!result.leds_changed);
+    }
+
+    #[test]
+    fn preset_next_wraps_around() {
+        let config = make_three_preset_config();
+        let mut ctrl = Controller::new();
+
+        // Go to preset 2 first
+        ctrl.select_preset(2, &config);
+        assert_eq!(ctrl.active_preset(), 2);
+
+        // Now process PresetNext via a button
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::PresetNext).ok();
+
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        buttons.push(momentary_button(on_press, HVec::new())).ok();
+
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        for _i in 0..3u8 {
+            let mut btns: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+            let mut bp: HVec<Action, MAX_ACTIONS> = HVec::new();
+            bp.push(Action::PresetNext).ok();
+            btns.push(momentary_button(bp, HVec::new())).ok();
+            presets
+                .push(Preset {
+                    name: Label::try_from("P").unwrap(),
+                    buttons: btns,
+                    encoders: HVec::new(),
+                    analog: HVec::new(),
+                    defaults: Default::default(),
+                    on_enter: HVec::new(),
+                    on_exit: HVec::new(),
+                    triggers: HVec::new(),
+                })
+                .ok();
+        }
+        let config2 = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl2 = Controller::new();
+        ctrl2.select_preset(2, &config2);
+
+        let result = ctrl2.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config2,
+        );
+
+        assert!(result.preset_changed);
+        assert_eq!(ctrl2.active_preset(), 0); // wraps from 2 → 0
+    }
+}
