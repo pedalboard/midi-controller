@@ -2,7 +2,7 @@
 
 When adding a new feature (new action type, config field, button mode, etc.), follow this checklist to keep all repos in sync.
 
-## 1. Protocol (`pedalboard-protocol`)
+## 1. Controller (`midi-controller`)
 
 This is always the starting point. All business logic lives here.
 
@@ -46,14 +46,14 @@ The firmware wires protocol logic to hardware.
 | Behavioral semantics (doc comments) | `pedalboard-cli/src/config.rs` | When adding YAML fields |
 | JSON Schema (machine-readable) | `pedalboard-cli/schema/pedalboard.schema.json` | Auto-generated from structs (validated by test) |
 | User-facing reference | `pedalboard-cli/docs/config-reference.md` | Hand-written — update when adding features |
-| Protocol engine tests | `pedalboard-protocol/src/engine.rs` | When adding/changing engine logic |
+| Protocol engine tests | `midi-controller/src/engine.rs` | When adding/changing engine logic |
 | Firmware architecture | `pedalboard-midi/docs/architecture.md` | When adding tasks or changing data flow |
 | System architecture | `dotgithub/docs/software-architecture.md` | When cross-module flow changes |
 
 ## Key Principles
 
-- **Protocol-first**: business logic in `pedalboard-protocol`, not firmware. This makes it testable without hardware.
+- **Protocol-first**: business logic in `midi-controller`, not firmware. This makes it testable without hardware.
 - **Schema is the source of truth**: doc comments on CLI structs → JSON schema → user docs. Don't document in only one place.
 - **Test the behavior, not the shape**: engine tests should verify what happens (MIDI output, state transitions, system actions), not just that structs serialize.
 - **Integration tests catch deserialization drift**: if protocol serialization changes but firmware isn't reflashed, `integration.sh` will fail at content verification. Always flash before running integration tests after protocol changes.
-- **Push order matters**: protocol → CLI → firmware. Pre-commit hooks validate against the remote protocol.
+- **Push order matters**: midi-controller → CLI → firmware. Pre-commit hooks validate against the remote protocol.

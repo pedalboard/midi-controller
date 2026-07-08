@@ -1,12 +1,27 @@
-# pedalboard-protocol
+# midi-controller
 
-Shared configuration types and MIDI-CI Property Exchange framing for the Pedalboard platform.
+Generic MIDI controller engine — button/encoder input processing, LED ring rendering, preset state management, and MIDI-CI Property Exchange framing.
 
 ## Features
 
-- `#![no_std]` compatible
-- Uses `postcard` for serialization
-- Uses `heapless` collections
+- `#![no_std]` compatible — runs on microcontrollers and in simulators
+- Input processing: debounce, long-press detection, encoder acceleration, tap tempo
+- LED ring rendering with animations and modifiers
+- Preset and global config management with flash persistence support
+- MIDI-CI Property Exchange (PE) message framing
+- Serialization via `postcard` + `heapless` collections
+
+## Usage
+
+```toml
+[dependencies]
+midi-controller = "0.1"
+```
+
+```rust
+use midi_controller::controller::{Controller, Event, Output};
+use midi_controller::config::Config;
+```
 
 ## License
 

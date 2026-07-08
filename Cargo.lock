@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pedalboard-protocol"
+name = "midi-controller"
 version = "0.1.0"
 dependencies = [
  "heapless",
