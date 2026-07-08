@@ -227,14 +227,13 @@ impl Controller {
         self.state_store.current().encoder_values
     }
 
-    /// Serialize current state for EEPROM persistence.
-    pub fn save_state(&self) -> heapless::Vec<u8, 128> {
-        let mut buf = [0u8; 128];
-        let mut store_copy = self.state_store.clone();
+    /// Get a snapshot of the state store (with current working state saved).
+    /// Use this for persistence — the caller decides the serialization format.
+    pub fn snapshot_store(&self) -> PresetStateStore {
+        let mut store = self.state_store.clone();
         let working = self.working_state();
-        store_copy.save_working(&working);
-        store_copy.to_eeprom(&mut buf);
-        heapless::Vec::from_slice(&buf).unwrap_or_default()
+        store.save_working(&working);
+        store
     }
 
     /// Manually switch to a preset (e.g., on boot or from external command).
