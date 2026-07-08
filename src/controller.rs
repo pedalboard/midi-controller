@@ -38,8 +38,6 @@ pub enum InputEvent {
         min: u16,
         max: u16,
     },
-    /// Tap tempo button press.
-    TapTempo,
     /// Incoming MIDI (for trigger processing). Up to 3 bytes.
     IncomingMidi { data: [u8; 3], len: u8 },
     /// Periodic tick — drives long-press detection. Send every 1-10ms.
@@ -131,7 +129,7 @@ impl Controller {
     }
 
     /// Process a single input event. Returns all MIDI output, display events,
-    /// and flags. System actions (preset switch) are handled internally.
+    /// and flags. System actions (preset switch, tap tempo) are handled internally.
     pub fn process(&mut self, event: InputEvent, now_ms: u32, config: &Config) -> ControllerResult {
         let mut result = match event {
             InputEvent::ButtonEdge { index, edge } => {
@@ -146,14 +144,6 @@ impl Controller {
                 min,
                 max,
             } => self.process_analog(index as usize, raw, min, max, config),
-            InputEvent::TapTempo => {
-                let mut r = ControllerResult::new();
-                r.bpm = self.tap_tempo.tap(now_ms);
-                if let Some(bpm) = r.bpm {
-                    r.display.push(DisplayEvent::BpmOverlay { bpm }).ok();
-                }
-                r
-            }
             InputEvent::IncomingMidi { data, len } => {
                 self.do_process_incoming_midi(&data[..len as usize], config)
             }
@@ -161,7 +151,7 @@ impl Controller {
         };
 
         // Handle system actions produced by event processing
-        self.handle_system_actions(&mut result, config);
+        self.handle_system_actions(&mut result, now_ms, config);
 
         result
     }
@@ -219,7 +209,7 @@ impl Controller {
 
             // Handle system actions from triggers (preset switch)
             for s in &trigger_result.system {
-                self.execute_system_action(*s, &mut result, config);
+                self.execute_system_action(*s, &mut result, 0, config);
             }
         }
 
@@ -288,12 +278,16 @@ impl Controller {
         config.presets.get(self.active_preset as usize)
     }
 
-    fn handle_system_actions(&mut self, result: &mut ControllerResult, config: &Config) {
-        // Drain pending system actions and execute them
+    fn handle_system_actions(
+        &mut self,
+        result: &mut ControllerResult,
+        now_ms: u32,
+        config: &Config,
+    ) {
         let actions: heapless::Vec<SystemAction, 2> = result.pending_system.clone();
         result.pending_system.clear();
         for action in &actions {
-            self.execute_system_action(*action, result, config);
+            self.execute_system_action(*action, result, now_ms, config);
         }
     }
 
@@ -498,6 +492,7 @@ impl Controller {
         &mut self,
         action: SystemAction,
         result: &mut ControllerResult,
+        now_ms: u32,
         config: &Config,
     ) {
         let num_presets = config.presets.iter().filter(|p| !p.name.is_empty()).count() as u8;
@@ -529,7 +524,10 @@ impl Controller {
                 result.display.push(DisplayEvent::BpmOverlay { bpm }).ok();
             }
             SystemAction::TapTempo => {
-                // Handled via InputEvent::TapTempo
+                result.bpm = self.tap_tempo.tap(now_ms);
+                if let Some(bpm) = result.bpm {
+                    result.display.push(DisplayEvent::BpmOverlay { bpm }).ok();
+                }
             }
         }
     }
