@@ -1196,7 +1196,7 @@ mod tests {
         let config = make_config(buttons, HVec::new());
         let mut ctrl = Controller::new();
 
-        // First tap at t=0 — no BPM yet (need at least 2)
+        // First tap at t=0 — no BPM yet (need 4 taps)
         let result = ctrl.process(
             Event::ButtonEdge {
                 index: 0,
@@ -1207,23 +1207,42 @@ mod tests {
         );
         assert_eq!(result.bpm, None);
 
-        // Release (not relevant for tap tempo, but needed for state)
+        // Taps 2 and 3 — still no BPM
+        for t in [500, 1000] {
+            ctrl.process(
+                Event::ButtonEdge {
+                    index: 0,
+                    edge: Edge::Deactivate,
+                },
+                t - 50,
+                &config,
+            );
+            let result = ctrl.process(
+                Event::ButtonEdge {
+                    index: 0,
+                    edge: Edge::Activate,
+                },
+                t,
+                &config,
+            );
+            assert_eq!(result.bpm, None);
+        }
+
+        // Fourth tap at t=1500 → 120 BPM
         ctrl.process(
             Event::ButtonEdge {
                 index: 0,
                 edge: Edge::Deactivate,
             },
-            50,
+            1450,
             &config,
         );
-
-        // Second tap at t=500 → 120 BPM
         let result = ctrl.process(
             Event::ButtonEdge {
                 index: 0,
                 edge: Edge::Activate,
             },
-            500,
+            1500,
             &config,
         );
         assert_eq!(result.bpm, Some(120));

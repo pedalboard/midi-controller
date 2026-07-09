@@ -57,8 +57,8 @@ impl TapTempo {
             self.taps[MAX_TAPS - 1] = now_ms;
         }
 
-        // Need at least 2 taps to compute an interval
-        if self.count < 2 {
+        // Need full window to compute stable BPM
+        if (self.count as usize) < MAX_TAPS {
             return None;
         }
 
@@ -95,20 +95,20 @@ mod tests {
     }
 
     #[test]
-    fn two_taps_at_120bpm() {
+    fn three_taps_returns_none() {
         let mut tt = TapTempo::new();
         tt.tap(0);
-        // 500ms interval = 120 BPM
-        assert_eq!(tt.tap(500), Some(120));
+        assert_eq!(tt.tap(500), None);
+        assert_eq!(tt.tap(1000), None);
     }
 
     #[test]
-    fn four_taps_averages_intervals() {
+    fn four_taps_at_120bpm() {
         let mut tt = TapTempo::new();
         tt.tap(0);
-        tt.tap(500); // 120 BPM
-        tt.tap(1000); // 120 BPM
-                      // Fourth tap: total span = 1500ms, 3 intervals, avg = 500ms = 120 BPM
+        tt.tap(500);
+        tt.tap(1000);
+        // Fourth tap: total span = 1500ms, 3 intervals, avg = 500ms = 120 BPM
         assert_eq!(tt.tap(1500), Some(120));
     }
 
@@ -117,34 +117,43 @@ mod tests {
         let mut tt = TapTempo::new();
         tt.tap(0);
         tt.tap(400);
-        // 3rd tap at 900: span = 900ms, 2 intervals, avg = 450ms = 133 BPM
-        assert_eq!(tt.tap(900), Some(133));
+        tt.tap(900);
+        // 4th tap at 1400: span = 1400ms, 3 intervals, avg = 466ms = 128 BPM
+        assert_eq!(tt.tap(1400), Some(128));
     }
 
     #[test]
     fn timeout_resets() {
         let mut tt = TapTempo::new();
         tt.tap(0);
-        tt.tap(500); // 120 BPM
-                     // 3 seconds later — should reset
+        tt.tap(500);
+        tt.tap(1000);
+        tt.tap(1500); // stable at 120
+                      // 3 seconds later — should reset
         assert_eq!(tt.tap(5500), None); // first tap after reset
-        assert_eq!(tt.tap(6000), Some(120)); // second tap, 500ms interval
+        assert_eq!(tt.tap(6000), None);
+        assert_eq!(tt.tap(6500), None);
+        assert_eq!(tt.tap(7000), Some(120)); // fourth tap after reset
     }
 
     #[test]
     fn clamps_at_max_bpm() {
         let mut tt = TapTempo::new();
         tt.tap(0);
+        tt.tap(300);
+        tt.tap(600);
         // 300ms interval = 200 BPM → clamped to 200
-        assert_eq!(tt.tap(300), Some(200));
+        assert_eq!(tt.tap(900), Some(200));
     }
 
     #[test]
     fn clamps_at_min_bpm() {
         let mut tt = TapTempo::new();
         tt.tap(0);
-        // 1999ms interval (just under timeout) = 30 BPM
-        assert_eq!(tt.tap(1999), Some(30));
+        tt.tap(1900);
+        tt.tap(3800);
+        // ~1900ms intervals = 31 BPM → clamped to 30
+        assert_eq!(tt.tap(5700), Some(31));
     }
 
     #[test]
@@ -163,8 +172,10 @@ mod tests {
         let mut tt = TapTempo::new();
         tt.tap(0);
         tt.tap(500);
+        tt.tap(1000);
+        tt.tap(1500);
         tt.reset();
-        assert_eq!(tt.tap(1000), None); // first tap after reset
+        assert_eq!(tt.tap(2000), None); // first tap after reset
     }
 
     #[test]
@@ -173,18 +184,21 @@ mod tests {
         tt.tap(0);
         // Bounce at 50ms — should be ignored
         assert_eq!(tt.tap(50), None);
-        // Real second tap at 500ms
-        assert_eq!(tt.tap(500), Some(120));
+        tt.tap(500);
+        tt.tap(1000);
+        // Fourth real tap at 1500ms
+        assert_eq!(tt.tap(1500), Some(120));
     }
 
     #[test]
     fn ignores_bounce_mid_sequence() {
         let mut tt = TapTempo::new();
         tt.tap(0);
-        tt.tap(500); // 120 BPM
-                     // Bounce at 550ms — ignored
-        assert_eq!(tt.tap(550), None);
-        // Real tap at 1000ms
-        assert_eq!(tt.tap(1000), Some(120));
+        tt.tap(500);
+        tt.tap(1000);
+        // Bounce at 1050ms — ignored
+        assert_eq!(tt.tap(1050), None);
+        // Real 4th tap at 1500ms
+        assert_eq!(tt.tap(1500), Some(120));
     }
 }
