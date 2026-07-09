@@ -37,12 +37,16 @@ impl TapTempo {
     pub fn tap(&mut self, now_ms: u32) -> Option<u16> {
         // Reset if timed out since last tap
         if self.count > 0 {
-            let last = self.taps[(self.count - 1) as usize];
+            let last_idx = (self.count - 1).min(MAX_TAPS as u8 - 1) as usize;
+            let last = self.taps[last_idx];
             let elapsed = now_ms.wrapping_sub(last);
             if elapsed > TIMEOUT_MS {
                 self.count = 0;
             } else if elapsed < MIN_INTERVAL_MS {
                 // Ignore bounce / double-tap (too fast to be a real tap)
+                return None;
+            } else if self.count as usize >= MAX_TAPS {
+                // Already locked in — ignore until timeout
                 return None;
             }
         }
@@ -51,10 +55,6 @@ impl TapTempo {
         if (self.count as usize) < MAX_TAPS {
             self.taps[self.count as usize] = now_ms;
             self.count += 1;
-        } else {
-            // Shift left and append
-            self.taps.rotate_left(1);
-            self.taps[MAX_TAPS - 1] = now_ms;
         }
 
         // Need full window to compute stable BPM
@@ -157,14 +157,15 @@ mod tests {
     }
 
     #[test]
-    fn more_than_max_taps_shifts_window() {
+    fn locked_after_four_taps() {
         let mut tt = TapTempo::new();
         tt.tap(0);
         tt.tap(500);
         tt.tap(1000);
-        tt.tap(1500);
-        // 5th tap shifts window: [500, 1000, 1500, 2000], avg = 500ms
-        assert_eq!(tt.tap(2000), Some(120));
+        assert_eq!(tt.tap(1500), Some(120));
+        // 5th tap is ignored (locked until timeout)
+        assert_eq!(tt.tap(2000), None);
+        assert_eq!(tt.tap(2500), None);
     }
 
     #[test]
