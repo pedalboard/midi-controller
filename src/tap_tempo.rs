@@ -5,8 +5,9 @@
 
 const MAX_TAPS: usize = 4;
 const TIMEOUT_MS: u32 = 2000;
+const MIN_INTERVAL_MS: u32 = 300;
 const MIN_BPM: u16 = 30;
-const MAX_BPM: u16 = 300;
+const MAX_BPM: u16 = 200;
 
 /// Tap tempo state. Tracks timestamps of recent taps and computes BPM.
 #[derive(Debug, Clone)]
@@ -37,8 +38,12 @@ impl TapTempo {
         // Reset if timed out since last tap
         if self.count > 0 {
             let last = self.taps[(self.count - 1) as usize];
-            if now_ms.wrapping_sub(last) > TIMEOUT_MS {
+            let elapsed = now_ms.wrapping_sub(last);
+            if elapsed > TIMEOUT_MS {
                 self.count = 0;
+            } else if elapsed < MIN_INTERVAL_MS {
+                // Ignore bounce / double-tap (too fast to be a real tap)
+                return None;
             }
         }
 
@@ -130,8 +135,8 @@ mod tests {
     fn clamps_at_max_bpm() {
         let mut tt = TapTempo::new();
         tt.tap(0);
-        // 100ms interval = 600 BPM → clamped to 300
-        assert_eq!(tt.tap(100), Some(300));
+        // 300ms interval = 200 BPM → clamped to 200
+        assert_eq!(tt.tap(300), Some(200));
     }
 
     #[test]
@@ -160,5 +165,26 @@ mod tests {
         tt.tap(500);
         tt.reset();
         assert_eq!(tt.tap(1000), None); // first tap after reset
+    }
+
+    #[test]
+    fn ignores_bounce_tap() {
+        let mut tt = TapTempo::new();
+        tt.tap(0);
+        // Bounce at 50ms — should be ignored
+        assert_eq!(tt.tap(50), None);
+        // Real second tap at 500ms
+        assert_eq!(tt.tap(500), Some(120));
+    }
+
+    #[test]
+    fn ignores_bounce_mid_sequence() {
+        let mut tt = TapTempo::new();
+        tt.tap(0);
+        tt.tap(500); // 120 BPM
+                     // Bounce at 550ms — ignored
+        assert_eq!(tt.tap(550), None);
+        // Real tap at 1000ms
+        assert_eq!(tt.tap(1000), Some(120));
     }
 }
