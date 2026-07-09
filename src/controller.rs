@@ -48,6 +48,9 @@ pub enum Event {
 pub struct Output {
     /// MIDI actions to emit (includes on_enter/on_exit/recall on preset switch).
     pub midi: heapless::Vec<ActionStep, 32>,
+    /// Routed MIDI messages with destination port(s).
+    /// Includes thru-forwarded messages and future controller-generated output.
+    pub midi_out: heapless::Vec<crate::routing::MidiOut, 16>,
     /// Display events (overlays, hints).
     pub display: heapless::Vec<DisplayEvent, 2>,
     /// Whether LED state changed and needs re-rendering.
@@ -70,6 +73,7 @@ impl Output {
     fn new() -> Self {
         Self {
             midi: heapless::Vec::new(),
+            midi_out: heapless::Vec::new(),
             display: heapless::Vec::new(),
             leds_changed: false,
             preset_changed: false,
@@ -153,8 +157,8 @@ impl<const B: usize, const E: usize> Controller<B, E> {
                 self.process_encoder(index as usize, clockwise, now_ms, config)
             }
             Event::Analog { index, raw } => self.process_analog(index as usize, raw, config),
-            Event::Midi { data, len, .. } => {
-                self.do_process_incoming_midi(&data[..len as usize], config)
+            Event::Midi { data, len, source } => {
+                self.do_process_incoming_midi(&data[..len as usize], source, config)
             }
             Event::Tick => self.do_tick(now_ms, config),
         };
@@ -207,9 +211,19 @@ impl<const B: usize, const E: usize> Controller<B, E> {
     fn do_process_incoming_midi<const A: usize>(
         &mut self,
         raw: &[u8],
+        source: MidiPort,
         config: &Config<B, E, A>,
     ) -> Output {
         let mut result = Output::new();
+
+        // Thru routing: forward incoming MIDI to configured destination ports
+        let thru_dest = self.thru_destination(source, config);
+        if !thru_dest.is_empty() && !raw.is_empty() {
+            result
+                .midi_out
+                .push(crate::routing::MidiOut::new(raw, thru_dest))
+                .ok();
+        }
 
         let preset = match config.presets.get(self.active_preset as usize) {
             Some(p) => p,
@@ -236,6 +250,27 @@ impl<const B: usize, const E: usize> Controller<B, E> {
         }
 
         result
+    }
+
+    /// Compute thru destination ports for a given source port based on global config.
+    fn thru_destination<const A: usize>(
+        &self,
+        source: MidiPort,
+        config: &Config<B, E, A>,
+    ) -> MidiPort {
+        let mut dest = MidiPort::empty();
+        if source.contains(MidiPort::DIN) && config.global.din_to_usb_thru {
+            dest |= MidiPort::USB;
+        }
+        if source.contains(MidiPort::USB) {
+            if config.global.usb_to_din_thru {
+                dest |= MidiPort::DIN;
+            }
+            if config.global.usb_to_usb_thru {
+                dest |= MidiPort::USB;
+            }
+        }
+        dest
     }
 
     /// Returns true if any button is currently held.
@@ -1770,5 +1805,135 @@ mod tests {
         let result = ctrl.process(Event::Tick, 100, &config);
         assert_eq!(result.mon_led, None);
         assert_eq!(result.mode_led, None);
+    }
+
+    // --- Test: Thru routing (DIN → USB when enabled) ---
+    #[test]
+    fn thru_din_to_usb_enabled() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let mut config: Config = Config::default();
+        config.global.din_to_usb_thru = true;
+        config.presets.push(Preset::default()).ok();
+
+        let result = ctrl.process(
+            Event::Midi {
+                data: [0x90, 60, 100, 0, 0, 0, 0, 0],
+                len: 3,
+                source: MidiPort::DIN,
+            },
+            0,
+            &config,
+        );
+
+        assert_eq!(result.midi_out.len(), 1);
+        assert_eq!(result.midi_out[0].bytes(), &[0x90, 60, 100]);
+        assert_eq!(result.midi_out[0].dest, MidiPort::USB);
+    }
+
+    #[test]
+    fn thru_din_to_usb_disabled() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let mut config: Config = Config::default();
+        config.global.din_to_usb_thru = false;
+        config.presets.push(Preset::default()).ok();
+
+        let result = ctrl.process(
+            Event::Midi {
+                data: [0x90, 60, 100, 0, 0, 0, 0, 0],
+                len: 3,
+                source: MidiPort::DIN,
+            },
+            0,
+            &config,
+        );
+
+        assert!(result.midi_out.is_empty());
+    }
+
+    #[test]
+    fn thru_usb_to_din_enabled() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let mut config: Config = Config::default();
+        config.global.usb_to_din_thru = true;
+        config.presets.push(Preset::default()).ok();
+
+        let result = ctrl.process(
+            Event::Midi {
+                data: [0xB0, 7, 64, 0, 0, 0, 0, 0],
+                len: 3,
+                source: MidiPort::USB,
+            },
+            0,
+            &config,
+        );
+
+        assert_eq!(result.midi_out.len(), 1);
+        assert!(result.midi_out[0].dest.contains(MidiPort::DIN));
+        assert!(!result.midi_out[0].dest.contains(MidiPort::USB));
+    }
+
+    #[test]
+    fn thru_usb_to_both() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let mut config: Config = Config::default();
+        config.global.usb_to_din_thru = true;
+        config.global.usb_to_usb_thru = true;
+        config.presets.push(Preset::default()).ok();
+
+        let result = ctrl.process(
+            Event::Midi {
+                data: [0xB0, 1, 127, 0, 0, 0, 0, 0],
+                len: 3,
+                source: MidiPort::USB,
+            },
+            0,
+            &config,
+        );
+
+        assert_eq!(result.midi_out.len(), 1);
+        assert!(result.midi_out[0].dest.contains(MidiPort::DIN));
+        assert!(result.midi_out[0].dest.contains(MidiPort::USB));
+    }
+
+    #[test]
+    fn thru_no_routing_when_all_disabled() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let mut config: Config = Config::default();
+        config.global.din_to_usb_thru = false;
+        config.global.usb_to_din_thru = false;
+        config.global.usb_to_usb_thru = false;
+        config.presets.push(Preset::default()).ok();
+
+        let result = ctrl.process(
+            Event::Midi {
+                data: [0x90, 48, 80, 0, 0, 0, 0, 0],
+                len: 3,
+                source: MidiPort::DIN,
+            },
+            0,
+            &config,
+        );
+
+        assert!(result.midi_out.is_empty());
+    }
+
+    #[test]
+    fn incoming_midi_sets_mon_led_blue() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let mut config: Config = Config::default();
+        config.presets.push(Preset::default()).ok();
+
+        let result = ctrl.process(
+            Event::Midi {
+                data: [0x90, 60, 100, 0, 0, 0, 0, 0],
+                len: 3,
+                source: MidiPort::USB,
+            },
+            0,
+            &config,
+        );
+
+        // No triggers → no MIDI output → Mon LED should be blue (incoming processed)
+        assert_eq!(result.mon_led, Some(crate::led::Rgb::new(0, 0, 255)));
     }
 }
