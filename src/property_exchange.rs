@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn not_ci_for_opendeck() {
+    fn not_ci_for_legacy_sysex() {
         let buf = [0xF0, 0x00, 0x53, 0x43, 0x00, 0x00, 0x01, 0xF7];
         assert!(!is_ci_message(&buf));
     }

@@ -64,7 +64,7 @@ impl SystemCommand {
 }
 
 /// System-wide configuration, independent of presets.
-/// Replaces OpenDeck global settings.
+/// Global device settings (MIDI routing, clock, calibration).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalConfig {
     /// Enable DIN MIDI output for locally-generated messages.
