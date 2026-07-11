@@ -173,6 +173,9 @@ impl<const B: usize, const E: usize> Controller<B, E> {
         // Handle system actions produced by event processing
         self.handle_system_actions(&mut result, now_ms, config);
 
+        // Apply output filters (routing decisions on generated MIDI)
+        Self::apply_output_filters(&mut result, &config.global);
+
         // Indicator LEDs
         if !result.midi.is_empty() {
             // Green flash: MIDI output generated
@@ -324,6 +327,7 @@ impl<const B: usize, const E: usize> Controller<B, E> {
     ) -> Output {
         let mut result = Output::new();
         self.do_switch_preset(preset_idx, &mut result, config);
+        Self::apply_output_filters(&mut result, &config.global);
         result
     }
 
@@ -334,6 +338,28 @@ impl<const B: usize, const E: usize> Controller<B, E> {
             state.encoder_values[index] = value;
         }
         self.state_store.save_working(&state);
+    }
+
+    // --- Output Filters ---
+
+    /// Apply routing filters to all generated MIDI output.
+    /// Currently: internal channel messages → USB only (skip DIN).
+    /// Designed to be extensible for future filter rules.
+    fn apply_output_filters(result: &mut Output, global: &crate::config::GlobalConfig) {
+        use crate::routing::MidiPort;
+
+        let internal_ch = global.internal_channel;
+        for step in result.midi.iter_mut() {
+            if let ActionStep::Send(ref mut msg) = step {
+                // Channel voice messages (0x80-0xEF): check if on internal channel
+                if msg.len >= 1 && msg.data[0] >= 0x80 && msg.data[0] <= 0xEF {
+                    let msg_channel = (msg.data[0] & 0x0F) + 1;
+                    if msg_channel == internal_ch {
+                        msg.dest = MidiPort::USB;
+                    }
+                }
+            }
+        }
     }
 
     // --- Private ---

@@ -141,10 +141,10 @@ impl<const B: usize, const E: usize> PresetStateStore<B, E> {
         for (i, enc) in preset.encoders.iter().enumerate() {
             if let EncoderAction::Cc { cc, channel, .. } = &enc.action {
                 recall
-                    .push(MidiMessage {
-                        data: [0xB0 | (channel - 1), *cc as u8, working.encoder_values[i]],
-                        len: 3,
-                    })
+                    .push(MidiMessage::new(
+                        [0xB0 | (channel - 1), *cc as u8, working.encoder_values[i]],
+                        3,
+                    ))
                     .ok();
             }
         }

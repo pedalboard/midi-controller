@@ -1,12 +1,31 @@
 //! Action executor: converts preset button actions into raw MIDI bytes.
 
 use crate::config::{Action, EncoderAction, Preset};
+use crate::routing::MidiPort;
 
 /// A MIDI message ready to send (up to 3 bytes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MidiMessage {
     pub data: [u8; 3],
     pub len: usize,
+    /// Destination ports. Default: all ports.
+    pub dest: MidiPort,
+}
+
+impl MidiMessage {
+    /// Create a message targeting all ports (default routing).
+    pub fn new(data: [u8; 3], len: usize) -> Self {
+        Self {
+            data,
+            len,
+            dest: MidiPort::ALL,
+        }
+    }
+
+    /// Create a message with explicit port destination.
+    pub fn with_dest(data: [u8; 3], len: usize, dest: MidiPort) -> Self {
+        Self { data, len, dest }
+    }
 }
 
 /// Execute on_press actions for a button index. Returns up to 8 MIDI messages.
@@ -34,7 +53,7 @@ pub fn action_to_midi(action: &Action) -> Option<MidiMessage> {
             if len == 0 {
                 return None;
             }
-            Some(MidiMessage { data: *data, len })
+            Some(MidiMessage::new(*data, len))
         }
         _ => None,
     }
@@ -68,10 +87,7 @@ pub fn encoder_cc<const B: usize, const E: usize, const A: usize>(
                 EncoderDirection::CounterClockwise => (*current_value).saturating_sub(1).max(*min),
             };
             *current_value = val;
-            Some(MidiMessage {
-                data: [0xB0 | (channel - 1), *cc as u8, val],
-                len: 3,
-            })
+            Some(MidiMessage::new([0xB0 | (channel - 1), *cc as u8, val], 3))
         }
         EncoderAction::CcRelative {
             cc,
@@ -83,10 +99,7 @@ pub fn encoder_cc<const B: usize, const E: usize, const A: usize>(
                 EncoderDirection::Clockwise => *increment,
                 EncoderDirection::CounterClockwise => *decrement,
             };
-            Some(MidiMessage {
-                data: [0xB0 | (channel - 1), *cc, val],
-                len: 3,
-            })
+            Some(MidiMessage::new([0xB0 | (channel - 1), *cc, val], 3))
         }
         EncoderAction::PresetScroll => None,
     }
@@ -107,10 +120,10 @@ pub fn analog_cc<const B: usize, const E: usize, const A: usize>(
     let span = adc_max.saturating_sub(adc_min).max(1) as u32;
     let value =
         cfg.min + (((clamped - adc_min) as u32 * range as u32) / span).min(range as u32) as u8;
-    Some(MidiMessage {
-        data: [0xB0 | (cfg.channel - 1), cfg.cc, value],
-        len: 3,
-    })
+    Some(MidiMessage::new(
+        [0xB0 | (cfg.channel - 1), cfg.cc, value],
+        3,
+    ))
 }
 
 #[cfg(test)]

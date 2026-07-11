@@ -207,14 +207,14 @@ pub fn process_encoder<const B: usize, const E: usize, const A: usize>(
         EncoderAction::Cc { cc, channel, .. } => {
             result
                 .midi
-                .push(ActionStep::Send(MidiMessage {
-                    data: [
+                .push(ActionStep::Send(MidiMessage::new(
+                    [
                         0xB0 | (channel - 1),
                         *cc as u8,
                         state.encoder_values[enc_idx],
                     ],
-                    len: 3,
-                }))
+                    3,
+                )))
                 .ok();
         }
         EncoderAction::CcRelative {
@@ -229,10 +229,10 @@ pub fn process_encoder<const B: usize, const E: usize, const A: usize>(
             };
             result
                 .midi
-                .push(ActionStep::Send(MidiMessage {
-                    data: [0xB0 | (channel - 1), *cc, val],
-                    len: 3,
-                }))
+                .push(ActionStep::Send(MidiMessage::new(
+                    [0xB0 | (channel - 1), *cc, val],
+                    3,
+                )))
                 .ok();
         }
         EncoderAction::PresetScroll => match direction {
@@ -341,10 +341,10 @@ fn execute_actions(
                 if !cycle_values.is_empty() {
                     let idx = (*cycle_index as usize) % cycle_values.len();
                     let value = cycle_values[idx];
-                    midi.push(ActionStep::Send(MidiMessage {
-                        data: [0xB0 | (channel - 1), *cc, value],
-                        len: 3,
-                    }))
+                    midi.push(ActionStep::Send(MidiMessage::new(
+                        [0xB0 | (channel - 1), *cc, value],
+                        3,
+                    )))
                     .ok();
                     if *reverse {
                         *cycle_index = if *cycle_index == 0 {
