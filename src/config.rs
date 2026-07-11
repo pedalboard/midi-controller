@@ -97,6 +97,10 @@ pub struct GlobalConfig {
     /// Expression pedal 2 ADC value at toe (full) position.
     #[serde(default = "default_adc_max")]
     pub exp2_max: u16,
+    /// Internal MIDI channel (1-16). Messages on this channel skip DIN output
+    /// and are forwarded to USB only (for bridge consumption). Default: 16.
+    #[serde(default = "default_internal_channel")]
+    pub internal_channel: u8,
 }
 
 fn default_true() -> bool {
@@ -109,6 +113,10 @@ fn default_bpm() -> u16 {
 
 fn default_adc_max() -> u16 {
     3750
+}
+
+fn default_internal_channel() -> u8 {
+    16
 }
 
 impl Default for GlobalConfig {
@@ -124,6 +132,7 @@ impl Default for GlobalConfig {
             exp1_max: 3750,
             exp2_min: 0,
             exp2_max: 3750,
+            internal_channel: 16,
         }
     }
 }
@@ -633,6 +642,7 @@ mod tests {
             exp1_max: 3700,
             exp2_min: 200,
             exp2_max: 3750,
+            internal_channel: 16,
         };
         let mut buf = [0u8; 32];
         let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
@@ -685,8 +695,8 @@ mod tests {
         let gc = GlobalConfig::default();
         let mut buf = [0u8; 32];
         let bytes = postcard::to_slice(&gc, &mut buf).unwrap();
-        // 5 bools (5B) + bpm varint (1B) + 4x u16 varint (1+2+1+2 = 6B) = 12 bytes
-        assert_eq!(bytes.len(), 12);
+        // 5 bools (5B) + bpm varint (1B) + 4x u16 varint (1+2+1+2 = 6B) + internal_channel (1B) = 13 bytes
+        assert_eq!(bytes.len(), 13);
     }
 
     #[test]
