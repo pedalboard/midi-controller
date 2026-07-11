@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod action;
+pub mod clock;
 pub mod config;
 pub mod controller;
 pub mod encoder_accel;
