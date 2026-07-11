@@ -31,6 +31,22 @@ pub enum SystemAction {
     ClockToggle,
 }
 
+impl SystemAction {
+    /// Display label for long-press hints and overlays.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PresetNext => "Next",
+            Self::PresetPrev => "Prev",
+            Self::PresetSelect(_) => "Select",
+            Self::SetBpm(_) => "BPM",
+            Self::TapTempo => "Tap",
+            Self::ClockStart => "Start",
+            Self::ClockStop => "Stop",
+            Self::ClockToggle => "Clock",
+        }
+    }
+}
+
 /// Which display to show an overlay on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplaySide {
