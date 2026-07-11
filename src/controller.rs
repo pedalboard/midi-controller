@@ -794,6 +794,7 @@ mod tests {
                 on_enter: on_enter0,
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
 
@@ -827,6 +828,7 @@ mod tests {
                 on_enter: on_enter1,
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
 
@@ -851,6 +853,7 @@ mod tests {
                     on_enter,
                     on_exit: HVec::new(),
                     triggers: HVec::new(),
+                    ..Default::default()
                 })
                 .ok();
         }
@@ -1112,6 +1115,7 @@ mod tests {
                 on_enter: HVec::new(),
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
         presets
@@ -1124,6 +1128,7 @@ mod tests {
                 on_enter: HVec::new(),
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
         let config: Config = Config {
@@ -1489,6 +1494,7 @@ mod tests {
                     on_enter,
                     on_exit: HVec::new(),
                     triggers: HVec::new(),
+                    ..Default::default()
                 })
                 .ok();
         }
@@ -1559,6 +1565,7 @@ mod tests {
                 on_enter: HVec::new(),
                 on_exit,
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
 
@@ -1575,6 +1582,7 @@ mod tests {
                 on_enter,
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
 
@@ -1619,6 +1627,7 @@ mod tests {
                 on_enter: HVec::new(),
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
         presets
@@ -1631,6 +1640,7 @@ mod tests {
                 on_enter: HVec::new(),
                 on_exit: HVec::new(),
                 triggers: HVec::new(),
+                ..Default::default()
             })
             .ok();
 
@@ -1769,6 +1779,7 @@ mod tests {
                     on_enter: HVec::new(),
                     on_exit: HVec::new(),
                     triggers: HVec::new(),
+                    ..Default::default()
                 })
                 .ok();
         }

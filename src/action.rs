@@ -142,6 +142,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -246,6 +247,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -323,6 +325,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let msg = analog_cc(&preset, 0, 2048, 0, 4095).unwrap();
         assert_eq!(msg.data[0], 0xB0);
@@ -352,6 +355,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         // Full deflection
         let msg = analog_cc(&preset, 0, 4095, 0, 4095).unwrap();
@@ -372,6 +376,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         assert!(analog_cc(&preset, 0, 2048, 0, 4095).is_none());
     }
@@ -397,6 +402,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         // Calibrated range: 200–3700
         // At heel (200): output = 0

@@ -305,6 +305,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         }
     }
 

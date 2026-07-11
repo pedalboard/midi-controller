@@ -580,6 +580,7 @@ mod tests {
                     on_enter: Vec::new(),
                     on_exit: Vec::new(),
                     triggers: Vec::new(),
+                    ..Default::default()
                 });
                 p
             },

@@ -533,6 +533,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -588,6 +589,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -626,6 +628,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -660,6 +663,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -695,6 +699,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
         state.encoder_values[0] = 64;
@@ -737,6 +742,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
         state.encoder_values[0] = 64;
@@ -776,6 +782,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
         state.encoder_values[0] = 50;
@@ -811,6 +818,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
         state.encoder_values[0] = 99;
@@ -845,6 +853,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
         state.encoder_values[0] = 21;
@@ -885,6 +894,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -921,6 +931,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -950,6 +961,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -995,6 +1007,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
         state.encoder_values[1] = 50;
@@ -1039,6 +1052,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -1088,6 +1102,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -1140,6 +1155,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
 
         // Matching CC
@@ -1190,6 +1206,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -1236,6 +1253,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -1286,6 +1304,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -1336,6 +1355,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -1421,6 +1441,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         };
         let mut state = PresetState::default();
 
@@ -1450,6 +1471,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers: heapless::Vec::new(),
+            ..Default::default()
         }
     }
 
