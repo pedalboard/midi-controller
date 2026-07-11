@@ -2186,4 +2186,154 @@ mod tests {
             "incoming MIDI without trigger shouldn't dirty state"
         );
     }
+
+    // --- Output Filter Tests ---
+
+    #[test]
+    fn internal_channel_message_routed_to_usb_only() {
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press
+            .push(Action::Midi {
+                data: [0xBF, 80, 127],
+                len: 3,
+            })
+            .ok(); // CC on ch16 (0xBF = 0xB0 | 15)
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+
+        let mut config = make_config(buttons, HVec::new());
+        config.global.internal_channel = 16;
+
+        let mut ctrl = Controller::<6, 2>::new();
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        assert!(!result.midi.is_empty(), "expected MIDI output");
+        if let ActionStep::Send(ref msg) = result.midi[0] {
+            assert_eq!(
+                msg.dest,
+                MidiPort::USB,
+                "internal channel should route to USB only"
+            );
+            assert!(
+                !msg.dest.contains(MidiPort::DIN),
+                "internal channel should NOT go to DIN"
+            );
+        } else {
+            panic!("expected ActionStep::Send");
+        }
+    }
+
+    #[test]
+    fn non_internal_channel_message_routed_to_all() {
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press
+            .push(Action::Midi {
+                data: [0xB0, 80, 127],
+                len: 3,
+            })
+            .ok(); // CC on ch1 (0xB0)
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+
+        let mut config = make_config(buttons, HVec::new());
+        config.global.internal_channel = 16;
+
+        let mut ctrl = Controller::<6, 2>::new();
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        assert!(!result.midi.is_empty(), "expected MIDI output");
+        if let ActionStep::Send(ref msg) = result.midi[0] {
+            assert_eq!(
+                msg.dest,
+                MidiPort::ALL,
+                "non-internal channel should route to ALL"
+            );
+        } else {
+            panic!("expected ActionStep::Send");
+        }
+    }
+
+    #[test]
+    fn internal_channel_filter_configurable() {
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press
+            .push(Action::Midi {
+                data: [0xB9, 50, 100],
+                len: 3,
+            })
+            .ok(); // CC on ch10 (0xB9 = 0xB0 | 9)
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+
+        let mut config = make_config(buttons, HVec::new());
+        config.global.internal_channel = 10;
+
+        let mut ctrl = Controller::<6, 2>::new();
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+
+        assert!(!result.midi.is_empty());
+        if let ActionStep::Send(ref msg) = result.midi[0] {
+            assert_eq!(
+                msg.dest,
+                MidiPort::USB,
+                "channel 10 should be USB-only when internal_channel=10"
+            );
+        } else {
+            panic!("expected ActionStep::Send");
+        }
+    }
 }
