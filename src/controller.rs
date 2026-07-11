@@ -109,6 +109,7 @@ pub struct Controller<const B: usize = MAX_BUTTONS, const E: usize = MAX_ENCODER
     long_press: [LongPressDetector; B],
     encoder_accel: [EncoderAccel; E],
     tap_tempo: TapTempo,
+    clock: crate::clock::MidiClock,
     button_active: [bool; B],
     active_preset: u8,
 }
@@ -129,6 +130,7 @@ impl<const B: usize, const E: usize> Controller<B, E> {
             long_press: core::array::from_fn(|_| LongPressDetector::new_fired()),
             encoder_accel: core::array::from_fn(|_| EncoderAccel::new()),
             tap_tempo: TapTempo::new(),
+            clock: crate::clock::MidiClock::new(),
             button_active: [false; B],
             active_preset: 0,
         }
@@ -143,6 +145,7 @@ impl<const B: usize, const E: usize> Controller<B, E> {
             long_press: core::array::from_fn(|_| LongPressDetector::new_fired()),
             encoder_accel: core::array::from_fn(|_| EncoderAccel::new()),
             tap_tempo: TapTempo::new(),
+            clock: crate::clock::MidiClock::new(),
             button_active: state.button_active,
             active_preset: active,
         }
@@ -338,6 +341,35 @@ impl<const B: usize, const E: usize> Controller<B, E> {
             state.encoder_values[index] = value;
         }
         self.state_store.save_working(&state);
+    }
+
+    // --- Clock ---
+
+    /// Called by firmware timer at BPM interval. Returns F8 if clock is running.
+    pub fn clock_tick(&self) -> Output {
+        let mut result = Output::new();
+        if let Some(out) = self.clock.tick() {
+            for msg in &out.messages {
+                result.midi_out.push(msg.clone()).ok();
+            }
+        }
+        result
+    }
+
+    /// Update clock state from config. Call after config upload.
+    pub fn clock_update<const A: usize>(&mut self, config: &Config<B, E, A>) -> Output {
+        let mut result = Output::new();
+        if let Some(out) = self.clock.update_config(config.global.midi_clock) {
+            for msg in &out.messages {
+                result.midi_out.push(msg.clone()).ok();
+            }
+        }
+        result
+    }
+
+    /// Whether the MIDI clock is currently running.
+    pub fn clock_running(&self) -> bool {
+        self.clock.is_running()
     }
 
     // --- Output Filters ---
@@ -639,6 +671,28 @@ impl<const B: usize, const E: usize> Controller<B, E> {
                     result.display.push(DisplayEvent::BpmOverlay { bpm }).ok();
                 }
             }
+            SystemAction::ClockStart => {
+                let out = self.clock.start();
+                for msg in &out.messages {
+                    result.midi_out.push(msg.clone()).ok();
+                }
+            }
+            SystemAction::ClockStop => {
+                let out = self.clock.stop();
+                for msg in &out.messages {
+                    result.midi_out.push(msg.clone()).ok();
+                }
+            }
+            SystemAction::ClockToggle => {
+                let out = if self.clock.is_running() {
+                    self.clock.stop()
+                } else {
+                    self.clock.start()
+                };
+                for msg in &out.messages {
+                    result.midi_out.push(msg.clone()).ok();
+                }
+            }
         }
     }
 
@@ -693,6 +747,11 @@ impl<const B: usize, const E: usize> Controller<B, E> {
             // Recall MIDI (state sync)
             for msg in &recall {
                 result.midi.push(ActionStep::Send(msg.clone())).ok();
+            }
+
+            // Per-preset BPM (0 = no change)
+            if new_p.bpm > 0 {
+                result.bpm = Some(new_p.bpm);
             }
         }
 
@@ -751,6 +810,7 @@ mod tests {
                 on_enter,
                 on_exit,
                 triggers,
+                ..Default::default()
             })
             .ok();
         Config {
@@ -2346,5 +2406,194 @@ mod tests {
         } else {
             panic!("expected ActionStep::Send");
         }
+    }
+    // --- Clock Transport & Per-Preset BPM Tests ---
+
+    #[test]
+    fn clock_start_action_emits_fa() {
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::ClockStart).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::<6, 2>::new();
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        assert!(
+            result.midi_out.iter().any(|m| m.bytes() == &[0xFA]),
+            "should emit Start (FA)"
+        );
+        assert!(ctrl.clock_running());
+    }
+
+    #[test]
+    fn clock_stop_action_emits_fc() {
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut start_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        start_press.push(Action::ClockStart).ok();
+        let mut stop_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        stop_press.push(Action::ClockStop).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press: start_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press: stop_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::<6, 2>::new();
+        ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        let result = ctrl.process(
+            Event::ButtonEdge {
+                index: 1,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        assert!(
+            result.midi_out.iter().any(|m| m.bytes() == &[0xFC]),
+            "should emit Stop (FC)"
+        );
+        assert!(!ctrl.clock_running());
+    }
+
+    #[test]
+    fn clock_toggle_action() {
+        let mut buttons: HVec<ButtonConfig, MAX_BUTTONS> = HVec::new();
+        let mut on_press: HVec<Action, MAX_ACTIONS> = HVec::new();
+        on_press.push(Action::ClockToggle).ok();
+        buttons
+            .push(ButtonConfig {
+                label: Label::new(),
+                color: LedConfig::default(),
+                mode: ButtonMode::Momentary,
+                on_press,
+                on_release: HVec::new(),
+                on_long_press: HVec::new(),
+                listen_cc: None,
+                cycle_values: HVec::new(),
+            })
+            .ok();
+        let config = make_config(buttons, HVec::new());
+        let mut ctrl = Controller::<6, 2>::new();
+        let r = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            0,
+            &config,
+        );
+        assert!(r.midi_out.iter().any(|m| m.bytes() == &[0xFA]));
+        assert!(ctrl.clock_running());
+        let r = ctrl.process(
+            Event::ButtonEdge {
+                index: 0,
+                edge: Edge::Activate,
+            },
+            100,
+            &config,
+        );
+        assert!(r.midi_out.iter().any(|m| m.bytes() == &[0xFC]));
+        assert!(!ctrl.clock_running());
+    }
+
+    #[test]
+    fn clock_tick_emits_f8_when_running() {
+        let mut ctrl = Controller::<6, 2>::new();
+        let r = ctrl.clock_tick();
+        assert!(r.midi_out.is_empty(), "stopped clock should not tick");
+        let mut config = make_config(HVec::new(), HVec::new());
+        config.global.midi_clock = true;
+        ctrl.clock_update(&config);
+        let r = ctrl.clock_tick();
+        assert_eq!(r.midi_out.len(), 1);
+        assert_eq!(r.midi_out[0].bytes(), &[0xF8]);
+    }
+
+    #[test]
+    fn preset_switch_sets_bpm() {
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        presets
+            .push(Preset {
+                name: Label::try_from("S1").unwrap(),
+                bpm: 140,
+                ..Default::default()
+            })
+            .ok();
+        presets
+            .push(Preset {
+                name: Label::try_from("S2").unwrap(),
+                bpm: 95,
+                ..Default::default()
+            })
+            .ok();
+        let config = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl = Controller::<6, 2>::new();
+        let result = ctrl.select_preset(1, &config);
+        assert_eq!(result.bpm, Some(95));
+    }
+
+    #[test]
+    fn preset_switch_bpm_zero_no_change() {
+        let mut presets: HVec<Preset, MAX_PRESETS> = HVec::new();
+        presets
+            .push(Preset {
+                name: Label::try_from("A").unwrap(),
+                ..Default::default()
+            })
+            .ok();
+        let config = Config {
+            global: GlobalConfig::default(),
+            presets,
+        };
+        let mut ctrl = Controller::<6, 2>::new();
+        let result = ctrl.select_preset(0, &config);
+        assert_eq!(result.bpm, None, "bpm=0 should not change BPM");
     }
 }

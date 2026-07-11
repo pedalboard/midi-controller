@@ -181,6 +181,9 @@ pub struct Preset<
     /// Incoming MIDI triggers: react to external messages by changing state or firing actions.
     #[serde(default)]
     pub triggers: Vec<Trigger, MAX_TRIGGERS>,
+    /// BPM for this preset (30-300). Applied on preset switch. 0 = no change.
+    #[serde(default)]
+    pub bpm: u16,
 }
 
 pub const MAX_TRIGGERS: usize = 8;
@@ -324,6 +327,12 @@ pub enum Action {
     /// Tap tempo: updates MIDI clock BPM from press intervals.
     /// Averages the last 3 intervals (needs 4 taps). Resets after 2s idle.
     TapTempo,
+    /// Start MIDI clock transport (sends FA).
+    ClockStart,
+    /// Stop MIDI clock transport (sends FC).
+    ClockStop,
+    /// Toggle clock transport.
+    ClockToggle,
 }
 
 impl Action {
@@ -842,6 +851,7 @@ mod tests {
                 });
                 t
             },
+            bpm: 120,
         };
 
         let mut buf = [0u8; 512];
@@ -862,7 +872,7 @@ mod tests {
         }
 
         let hash = fnv1a(bytes);
-        const EXPECTED_HASH: u32 = 0x97ae_bc54;
+        const EXPECTED_HASH: u32 = 0xf412_3944;
         const EXPECTED_VERSION: u8 = 6;
 
         assert_eq!(

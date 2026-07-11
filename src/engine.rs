@@ -26,6 +26,9 @@ pub enum SystemAction {
     PresetSelect(u8),
     SetBpm(u16),
     TapTempo,
+    ClockStart,
+    ClockStop,
+    ClockToggle,
 }
 
 /// Which display to show an overlay on.
@@ -329,6 +332,15 @@ fn execute_actions(
                 // Handled by firmware — needs timestamp context not available here.
                 // Emit as a system action so the caller can process it.
                 system.push(SystemAction::TapTempo).ok();
+            }
+            Action::ClockStart => {
+                system.push(SystemAction::ClockStart).ok();
+            }
+            Action::ClockStop => {
+                system.push(SystemAction::ClockStop).ok();
+            }
+            Action::ClockToggle => {
+                system.push(SystemAction::ClockToggle).ok();
             }
             Action::Delay(ms) => {
                 midi.push(ActionStep::Delay(*ms)).ok();
@@ -1574,6 +1586,7 @@ mod tests {
             on_enter: heapless::Vec::new(),
             on_exit: heapless::Vec::new(),
             triggers,
+            ..Default::default()
         }
     }
 
