@@ -59,6 +59,9 @@ pub struct Output {
     pub preset_changed: bool,
     /// BPM computed from tap tempo (if any).
     pub bpm: Option<u16>,
+    /// Clock running state change. Set when ClockStart/Stop/Toggle is processed.
+    /// `Some(true)` = clock started, `Some(false)` = clock stopped, `None` = no change.
+    pub clock_running: Option<bool>,
     /// Mon indicator LED: flashes on MIDI activity.
     /// Green = MIDI output generated, Blue = incoming MIDI processed.
     pub mon_led: Option<crate::led::Rgb>,
@@ -83,6 +86,7 @@ impl Output {
             leds_changed: false,
             preset_changed: false,
             bpm: None,
+            clock_running: None,
             mon_led: None,
             mode_led: None,
             reactive_led: None,
@@ -676,12 +680,14 @@ impl<const B: usize, const E: usize> Controller<B, E> {
                 for msg in &out.messages {
                     result.midi_out.push(msg.clone()).ok();
                 }
+                result.clock_running = Some(true);
             }
             SystemAction::ClockStop => {
                 let out = self.clock.stop();
                 for msg in &out.messages {
                     result.midi_out.push(msg.clone()).ok();
                 }
+                result.clock_running = Some(false);
             }
             SystemAction::ClockToggle => {
                 let out = if self.clock.is_running() {
@@ -692,6 +698,7 @@ impl<const B: usize, const E: usize> Controller<B, E> {
                 for msg in &out.messages {
                     result.midi_out.push(msg.clone()).ok();
                 }
+                result.clock_running = Some(self.clock.is_running());
             }
         }
     }
